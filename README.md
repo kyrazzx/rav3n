@@ -132,7 +132,3 @@ To force a fresh offset download after a CS2 game update, delete `offsets.json` 
 ## License
 
 See [LICENSE](LICENSE).
-
-## Changelog
-
-See [PATCHNOTES.md](PATCHNOTES.md).
