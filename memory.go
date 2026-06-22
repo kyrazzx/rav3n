@@ -6,15 +6,25 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
+const entityListStride = 120
+
 var (
 	ntdll               = syscall.NewLazyDLL("ntdll.dll")
 	ntReadVirtualMemory = ntdll.NewProc("NtReadVirtualMemory")
+
+	readBufferPool = sync.Pool{
+		New: func() any {
+			buf := make([]byte, 4096)
+			return &buf
+		},
+	}
 )
 
 func getModuleBaseAddress(pid int, moduleName string) (uintptr, error) {
@@ -23,6 +33,7 @@ func getModuleBaseAddress(pid int, moduleName string) (uintptr, error) {
 		return 0, err
 	}
 	defer windows.CloseHandle(snapshot)
+
 	var me32 windows.ModuleEntry32
 	me32.Size = uint32(unsafe.Sizeof(me32))
 	if err := windows.Module32First(snapshot, &me32); err != nil {
@@ -36,7 +47,7 @@ func getModuleBaseAddress(pid int, moduleName string) (uintptr, error) {
 			break
 		}
 	}
-	return 0, fmt.Errorf("module not found")
+	return 0, fmt.Errorf("module %q not found", moduleName)
 }
 
 func getProcessHandle(pid int) (windows.Handle, error) {
@@ -49,6 +60,7 @@ func findProcessId(name string) (int, error) {
 		return 0, err
 	}
 	defer windows.CloseHandle(snapshot)
+
 	var process windows.ProcessEntry32
 	process.Size = uint32(unsafe.Sizeof(process))
 	if err := windows.Process32First(snapshot, &process); err != nil {
@@ -62,23 +74,44 @@ func findProcessId(name string) (int, error) {
 			break
 		}
 	}
-	return 0, fmt.Errorf("process not found")
+	return 0, fmt.Errorf("process %q not found", name)
 }
 
-func readMemoryNt(process windows.Handle, address uintptr, buffer []byte) error {
+func readMemory(process windows.Handle, address uintptr, buffer []byte) error {
+	if len(buffer) == 0 {
+		return nil
+	}
 	var bytesRead uintptr
-	size := uintptr(len(buffer))
 	status, _, _ := ntReadVirtualMemory.Call(
 		uintptr(process), address, uintptr(unsafe.Pointer(&buffer[0])),
-		size, uintptr(unsafe.Pointer(&bytesRead)),
+		uintptr(len(buffer)), uintptr(unsafe.Pointer(&bytesRead)),
 	)
 	if status != 0 {
-		return fmt.Errorf("NtReadVirtualMemory failed with status: 0x%X", status)
+		return fmt.Errorf("NtReadVirtualMemory failed: 0x%X", status)
 	}
-	if bytesRead != size {
-		return fmt.Errorf("incomplete read: expected %d bytes, got %d", size, bytesRead)
+	if bytesRead != uintptr(len(buffer)) {
+		return fmt.Errorf("incomplete read: expected %d, got %d", len(buffer), bytesRead)
 	}
 	return nil
+}
+
+func readAt(process windows.Handle, address uintptr, size int) ([]byte, error) {
+	poolBuf := readBufferPool.Get().(*[]byte)
+	buf := *poolBuf
+	if cap(buf) < size {
+		buf = make([]byte, size)
+	} else {
+		buf = buf[:size]
+	}
+	if err := readMemory(process, address, buf); err != nil {
+		readBufferPool.Put(poolBuf)
+		return nil, err
+	}
+	out := make([]byte, size)
+	copy(out, buf)
+	*poolBuf = buf
+	readBufferPool.Put(poolBuf)
+	return out, nil
 }
 
 func readSafe(process windows.Handle, address uintptr, value interface{}) error {
@@ -98,23 +131,64 @@ func readSafe(process windows.Handle, address uintptr, value interface{}) error 
 			return fmt.Errorf("unsupported type with size 0: %T", value)
 		}
 	}
-	buffer := make([]byte, size)
-	if err := readMemoryNt(process, address, buffer); err != nil {
+
+	poolBuf := readBufferPool.Get().(*[]byte)
+	buf := *poolBuf
+	if cap(buf) < size {
+		buf = make([]byte, size)
+	} else {
+		buf = buf[:size]
+	}
+	if err := readMemory(process, address, buf); err != nil {
+		readBufferPool.Put(poolBuf)
 		return err
 	}
-	reader := bytes.NewReader(buffer)
+
+	reader := bytes.NewReader(buf)
 	switch v := value.(type) {
 	case *[]byte:
-		copy(*v, buffer)
-		return nil
+		copy(*v, buf)
 	case *uintptr:
 		var u64 uint64
 		if err := binary.Read(reader, binary.LittleEndian, &u64); err != nil {
+			readBufferPool.Put(poolBuf)
 			return err
 		}
 		*v = uintptr(u64)
-		return nil
 	default:
-		return binary.Read(reader, binary.LittleEndian, value)
+		if err := binary.Read(reader, binary.LittleEndian, value); err != nil {
+			readBufferPool.Put(poolBuf)
+			return err
+		}
 	}
+	*poolBuf = buf
+	readBufferPool.Put(poolBuf)
+	return nil
+}
+
+func readPtr(process windows.Handle, address uintptr) (uintptr, error) {
+	var ptr uintptr
+	if err := readSafe(process, address, &ptr); err != nil {
+		return 0, err
+	}
+	return ptr, nil
+}
+
+func readEntityFromList(process windows.Handle, entityList uintptr, handle uint32) (uintptr, error) {
+	if handle == 0 || entityList == 0 {
+		return 0, fmt.Errorf("invalid handle or entity list")
+	}
+	listEntry, err := readPtr(process, entityList+uintptr(0x8*((handle&0x7FFF)>>9)+16))
+	if err != nil || listEntry == 0 {
+		return 0, err
+	}
+	return readPtr(process, listEntry+uintptr(entityListStride)*uintptr(handle&0x1FF))
+}
+
+func readController(process windows.Handle, entityList uintptr, index int) (uintptr, error) {
+	listEntry, err := readPtr(process, entityList+uintptr((8*(index&0x7FFF)>>9)+16))
+	if err != nil || listEntry == 0 {
+		return 0, err
+	}
+	return readPtr(process, listEntry+uintptr(entityListStride)*uintptr(index&0x1FF))
 }
