@@ -14,25 +14,26 @@ const (
 	offsetsURL     = "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json"
 	clientDllURL   = "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json"
 	offsetsFile    = "offsets.json"
-	offsetsMaxAge  = 6 * time.Hour
+	offsetsMaxAge  = 1 * time.Hour
 	boneArrayDelta = 0x80
 )
 
 type Offset struct {
-	DwViewMatrix           uintptr `json:"dwViewMatrix"`
-	DwLocalPlayerPawn      uintptr `json:"dwLocalPlayerPawn"`
-	DwEntityList           uintptr `json:"dwEntityList"`
-	M_hPlayerPawn          uintptr `json:"m_hPlayerPawn"`
-	M_iHealth              uintptr `json:"m_iHealth"`
-	M_lifeState            uintptr `json:"m_lifeState"`
-	M_iTeamNum             uintptr `json:"m_iTeamNum"`
-	M_vOldOrigin           uintptr `json:"m_vOldOrigin"`
-	M_pGameSceneNode       uintptr `json:"m_pGameSceneNode"`
-	M_modelState           uintptr `json:"m_modelState"`
-	M_boneArray            uintptr `json:"m_boneArray"`
-	M_bDormant             uintptr `json:"m_bDormant"`
-	M_iszPlayerName        uintptr `json:"m_iszPlayerName"`
-	M_bPawnIsAlive         uintptr `json:"m_bPawnIsAlive"`
+	DwViewMatrix      uintptr `json:"dwViewMatrix"`
+	DwLocalPlayerPawn uintptr `json:"dwLocalPlayerPawn"`
+	DwEntityList      uintptr `json:"dwEntityList"`
+	M_hPawn           uintptr `json:"m_hPawn"`
+	M_hPlayerPawn     uintptr `json:"m_hPlayerPawn"`
+	M_iHealth         uintptr `json:"m_iHealth"`
+	M_lifeState       uintptr `json:"m_lifeState"`
+	M_iTeamNum        uintptr `json:"m_iTeamNum"`
+	M_vOldOrigin      uintptr `json:"m_vOldOrigin"`
+	M_pGameSceneNode  uintptr `json:"m_pGameSceneNode"`
+	M_vecAbsOrigin    uintptr `json:"m_vecAbsOrigin"`
+	M_modelState      uintptr `json:"m_modelState"`
+	M_boneArray       uintptr `json:"m_boneArray"`
+	M_bDormant        uintptr `json:"m_bDormant"`
+	M_iszPlayerName   uintptr `json:"m_iszPlayerName"`
 }
 
 func (o Offset) valid() bool {
@@ -119,9 +120,9 @@ func buildOffsetsFromDumper() (Offset, error) {
 		DwEntityList:      uintptr(offsetsData.ClientDLL.DwEntityList),
 		DwLocalPlayerPawn: uintptr(offsetsData.ClientDLL.DwLocalPlayerPawn),
 		DwViewMatrix:      uintptr(offsetsData.ClientDLL.DwViewMatrix),
+		M_hPawn:           m("CBasePlayerController", "m_hPawn"),
 		M_hPlayerPawn:     m("CCSPlayerController", "m_hPlayerPawn"),
 		M_iszPlayerName:   m("CBasePlayerController", "m_iszPlayerName"),
-		M_bPawnIsAlive:    m("CCSPlayerController", "m_bPawnIsAlive"),
 		M_vOldOrigin:      m("C_BasePlayerPawn", "m_vOldOrigin"),
 		M_modelState:      modelState,
 		M_boneArray:       modelState + boneArrayDelta,
@@ -130,6 +131,7 @@ func buildOffsetsFromDumper() (Offset, error) {
 		M_lifeState:       m("C_BaseEntity", "m_lifeState"),
 		M_iTeamNum:        m("C_BaseEntity", "m_iTeamNum"),
 		M_pGameSceneNode:  m("C_BaseEntity", "m_pGameSceneNode"),
+		M_vecAbsOrigin:    m("CGameSceneNode", "m_vecAbsOrigin"),
 	}
 	return offsets, nil
 }
@@ -170,13 +172,6 @@ func offsetsFileFresh() bool {
 }
 
 func loadOffsets() Offset {
-	if offsetsFileFresh() {
-		if offsets, err := loadOffsetsFromFile(); err == nil {
-			log.Println("Using cached offsets.json")
-			return offsets
-		}
-	}
-
 	if offsets, err := buildOffsetsFromDumper(); err == nil {
 		if saveErr := saveOffsets(offsets); saveErr != nil {
 			log.Printf("Warning: could not save offsets.json: %v", saveErr)
@@ -186,6 +181,13 @@ func loadOffsets() Offset {
 		return offsets
 	} else {
 		log.Printf("Warning: could not fetch offsets online: %v", err)
+	}
+
+	if offsetsFileFresh() {
+		if offsets, err := loadOffsetsFromFile(); err == nil {
+			log.Println("Using cached offsets.json")
+			return offsets
+		}
 	}
 
 	offsets, err := loadOffsetsFromFile()

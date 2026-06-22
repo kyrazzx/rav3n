@@ -10,19 +10,19 @@ import (
 )
 
 const (
-	maxPlayers      = 64
-	boneStride      = 32
-	maxBoneIndex    = 28
-	boneBufferSize  = (maxBoneIndex + 1) * boneStride
-	lifeStateAlive  = 256
+	maxPlayers     = 64
+	boneStride     = 32
+	maxBoneIndex   = 28
+	boneBufferSize = (maxBoneIndex + 1) * boneStride
+	lifeStateAlive = 0
 )
 
 var boneIndices = map[string]int{
-	"head": 6, "neck_0": 5, "spine_1": 4, "spine_2": 2, "pelvis": 0,
-	"arm_upper_L": 8, "arm_lower_L": 9, "hand_L": 10,
+	"head": 7, "neck_0": 6, "spine_1": 8, "spine_2": 3, "pelvis": 1,
+	"arm_upper_L": 9, "arm_lower_L": 10, "hand_L": 11,
 	"arm_upper_R": 13, "arm_lower_R": 14, "hand_R": 15,
-	"leg_upper_L": 22, "leg_lower_L": 23, "ankle_L": 24,
-	"leg_upper_R": 25, "leg_lower_R": 26, "ankle_R": 27,
+	"leg_upper_L": 17, "leg_lower_L": 18, "ankle_L": 19,
+	"leg_upper_R": 20, "leg_lower_R": 21, "ankle_R": 22,
 }
 
 type Matrix [4][4]float32
@@ -41,6 +41,7 @@ type Vector2 struct{ X, Y float32 }
 type Rectangle struct{ Top, Left, Right, Bottom float32 }
 
 type Entity struct {
+	PawnAddr uintptr
 	Health   int32
 	Team     int32
 	Name     string
@@ -52,50 +53,62 @@ type Entity struct {
 }
 
 type screenProjector struct {
-	halfW, halfH float32
-	fullW, fullH float32
+	width, height float32
+	view          [16]float32
 }
 
-func newScreenProjector(width, height uintptr) screenProjector {
-	w := float32(width)
-	h := float32(height)
-	return screenProjector{halfW: w / 2, halfH: h / 2, fullW: w, fullH: h}
+func newScreenProjector(width, height float32, view [16]float32) screenProjector {
+	return screenProjector{width: width, height: height, view: view}
 }
 
-func (sp screenProjector) worldToScreen(viewMatrix Matrix, position Vector3) (float32, float32) {
-	screenX := viewMatrix[0][0]*position.X + viewMatrix[0][1]*position.Y + viewMatrix[0][2]*position.Z + viewMatrix[0][3]
-	screenY := viewMatrix[1][0]*position.X + viewMatrix[1][1]*position.Y + viewMatrix[1][2]*position.Z + viewMatrix[1][3]
-	w := viewMatrix[3][0]*position.X + viewMatrix[3][1]*position.Y + viewMatrix[3][2]*position.Z + viewMatrix[3][3]
-	if w < 0.01 {
-		return -1, -1
+// worldToScreen projects a world position through CS2's view-projection matrix (16 floats, row-major).
+func (sp screenProjector) worldToScreen(position Vector3) (float32, float32, bool) {
+	if sp.width <= 0 || sp.height <= 0 {
+		return 0, 0, false
 	}
-	invw := 1.0 / w
-	screenX *= invw
-	screenY *= invw
-	x := sp.halfW + 0.5*screenX*sp.fullW + 0.5
-	y := sp.halfH - 0.5*screenY*sp.fullH + 0.5
-	return x, y
+	m := sp.view
+	w := m[12]*position.X + m[13]*position.Y + m[14]*position.Z + m[15]
+	if w < 0.001 {
+		return 0, 0, false
+	}
+	inv := 1.0 / w
+	clipX := (m[0]*position.X + m[1]*position.Y + m[2]*position.Z + m[3]) * inv
+	clipY := (m[4]*position.X + m[5]*position.Y + m[6]*position.Z + m[7]) * inv
+
+	halfW := sp.width * 0.5
+	halfH := sp.height * 0.5
+	x := halfW + halfW*clipX
+	y := halfH - halfH*clipY
+	return x, y, true
 }
 
-func readPlayerName(procHandle windows.Handle, controller uintptr, offsets Offset) (string, error) {
+func readPlayerName(procHandle windows.Handle, controller uintptr, offsets Offset) string {
 	nameBytes, err := readAt(procHandle, controller+offsets.M_iszPlayerName, 128)
 	if err != nil {
-		return "", err
+		return "Player"
 	}
 	end := 0
 	for end < len(nameBytes) && nameBytes[end] != 0 {
 		end++
 	}
-	if end == 0 {
-		return "", fmt.Errorf("empty player name")
+	if end == 0 || !utf8.Valid(nameBytes[:end]) {
+		return "Player"
 	}
-	if utf8.Valid(nameBytes[:end]) {
-		return string(nameBytes[:end]), nil
-	}
-	return "", fmt.Errorf("invalid player name encoding")
+	return string(nameBytes[:end])
 }
 
-func readBones(procHandle windows.Handle, boneArray uintptr, viewMatrix Matrix, sp screenProjector, allBones bool) (map[string]Vector2, Vector3, bool) {
+func readPawnHandle(procHandle windows.Handle, controller uintptr, offsets Offset) (uint32, error) {
+	var handle uint32
+	if readSafe(procHandle, controller+offsets.M_hPawn, &handle) == nil && handle != 0 {
+		return handle, nil
+	}
+	if readSafe(procHandle, controller+offsets.M_hPlayerPawn, &handle) != nil || handle == 0 {
+		return 0, fmt.Errorf("no pawn handle")
+	}
+	return handle, nil
+}
+
+func readBones(procHandle windows.Handle, boneArray uintptr, sp screenProjector, allBones bool) (map[string]Vector2, Vector3, bool) {
 	boneData, err := readAt(procHandle, boneArray, boneBufferSize)
 	if err != nil || len(boneData) < boneBufferSize {
 		return nil, Vector3{}, false
@@ -115,12 +128,16 @@ func readBones(procHandle windows.Handle, boneArray uintptr, viewMatrix Matrix, 
 			Y: math.Float32frombits(binary.LittleEndian.Uint32(boneData[offset+4:])),
 			Z: math.Float32frombits(binary.LittleEndian.Uint32(boneData[offset+8:])),
 		}
+		if pos.X == 0 && pos.Y == 0 && pos.Z == 0 {
+			continue
+		}
 		if boneName == "head" {
 			headPos = pos
 			hasHead = true
 		}
-		x, y := sp.worldToScreen(viewMatrix, pos)
-		bones[boneName] = Vector2{X: x, Y: y}
+		if x, y, ok := sp.worldToScreen(pos); ok {
+			bones[boneName] = Vector2{X: x, Y: y}
+		}
 	}
 
 	return bones, headPos, hasHead
@@ -148,21 +165,16 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, sp screenProj
 		return entities
 	}
 
-	var viewMatrix Matrix
-	if readSafe(procHandle, clientDll+offsets.DwViewMatrix, &viewMatrix) != nil {
-		return entities
-	}
+	needAllBones := SkeletonRendering || BodyHighlightRendering
 
-	needAllBones := SkeletonRendering
-
-	for i := 1; i <= maxPlayers; i++ {
+	for i := 0; i < maxPlayers; i++ {
 		entityController, err := readController(procHandle, entityList, i)
 		if err != nil || entityController == 0 {
 			continue
 		}
 
-		var pawnHandle uint32
-		if readSafe(procHandle, entityController+offsets.M_hPlayerPawn, &pawnHandle) != nil || pawnHandle == 0 {
+		pawnHandle, err := readPawnHandle(procHandle, entityController, offsets)
+		if err != nil {
 			continue
 		}
 
@@ -171,18 +183,13 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, sp screenProj
 			continue
 		}
 
-		var pawnAlive bool
-		if readSafe(procHandle, entityController+offsets.M_bPawnIsAlive, &pawnAlive) == nil && !pawnAlive {
-			continue
-		}
-
-		var lifeState int32
+		var lifeState uint8
 		if readSafe(procHandle, entityPawn+offsets.M_lifeState, &lifeState) != nil || lifeState != lifeStateAlive {
 			continue
 		}
 
 		var teamNum int32
-		if readSafe(procHandle, entityPawn+offsets.M_iTeamNum, &teamNum) != nil || teamNum == 0 {
+		if readSafe(procHandle, entityPawn+offsets.M_iTeamNum, &teamNum) != nil || teamNum < 2 || teamNum > 3 {
 			continue
 		}
 		if TeamCheck && teamNum == localTeam {
@@ -191,11 +198,6 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, sp screenProj
 
 		var health int32
 		if readSafe(procHandle, entityPawn+offsets.M_iHealth, &health) != nil || health < 1 || health > 100 {
-			continue
-		}
-
-		name, err := readPlayerName(procHandle, entityController, offsets)
-		if err != nil {
 			continue
 		}
 
@@ -210,37 +212,64 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, sp screenProj
 		}
 
 		var entityOrigin Vector3
-		if readSafe(procHandle, entityPawn+offsets.M_vOldOrigin, &entityOrigin) != nil {
-			continue
+		originOK := offsets.M_vecAbsOrigin != 0 &&
+			readSafe(procHandle, gameScene+offsets.M_vecAbsOrigin, &entityOrigin) == nil
+		if !originOK {
+			if readSafe(procHandle, entityPawn+offsets.M_vOldOrigin, &entityOrigin) != nil {
+				continue
+			}
 		}
+
+		name := readPlayerName(procHandle, entityController, offsets)
 
 		var entityBones map[string]Vector2
 		var entityHead Vector3
-		boneArray, err := readPtr(procHandle, gameScene+offsets.M_boneArray)
-		if err != nil || boneArray == 0 {
-			continue
+		hasHead := false
+		boneArrayAddr := gameScene + offsets.M_modelState + boneArrayDelta
+		if boneArray, err := readPtr(procHandle, boneArrayAddr); err == nil && boneArray != 0 {
+			entityBones, entityHead, hasHead = readBones(procHandle, boneArray, sp, needAllBones)
 		}
-		var ok bool
-		entityBones, entityHead, ok = readBones(procHandle, boneArray, viewMatrix, sp, needAllBones)
-		if !ok {
+		if entityBones == nil {
+			entityBones = make(map[string]Vector2)
+		}
+
+		screenPosFeetX, screenPosFeetY, feetOK := sp.worldToScreen(entityOrigin)
+		if !feetOK && hasHead {
+			screenPosFeetX, screenPosFeetY, feetOK = sp.worldToScreen(entityHead)
+		}
+		if !feetOK {
 			continue
 		}
 
-		entityHeadTop := Vector3{entityHead.X, entityHead.Y, entityHead.Z + 7}
-		entityHeadBottom := Vector3{entityHead.X, entityHead.Y, entityHead.Z - 5}
-		screenPosHeadX, screenPosHeadTopY := sp.worldToScreen(viewMatrix, entityHeadTop)
-		_, screenPosHeadBottomY := sp.worldToScreen(viewMatrix, entityHeadBottom)
-		screenPosFeetX, screenPosFeetY := sp.worldToScreen(viewMatrix, entityOrigin)
-		entityBoxTopVec := Vector3{entityOrigin.X, entityOrigin.Y, entityOrigin.Z + 70}
-		_, screenPosBoxTop := sp.worldToScreen(viewMatrix, entityBoxTopVec)
+		entityBoxTopVec := Vector3{entityOrigin.X, entityOrigin.Y, entityOrigin.Z + 72}
+		_, screenPosBoxTop, topOK := sp.worldToScreen(entityBoxTopVec)
+		if !topOK {
+			screenPosBoxTop = screenPosFeetY - 80
+		}
 
-		if screenPosHeadX <= -1 || screenPosFeetY <= -1 ||
-			screenPosHeadX >= sp.fullW || screenPosHeadTopY >= sp.fullH {
-			continue
+		var screenPosHeadX, screenPosHeadTopY, screenPosHeadBottomY float32
+		if hasHead {
+			entityHeadTop := Vector3{entityHead.X, entityHead.Y, entityHead.Z + 7}
+			entityHeadBottom := Vector3{entityHead.X, entityHead.Y, entityHead.Z - 5}
+			screenPosHeadX, screenPosHeadTopY, _ = sp.worldToScreen(entityHeadTop)
+			_, screenPosHeadBottomY, _ = sp.worldToScreen(entityHeadBottom)
+		} else {
+			screenPosHeadX = screenPosFeetX
+			screenPosHeadTopY = screenPosBoxTop
+			screenPosHeadBottomY = screenPosBoxTop + 12
 		}
 
 		boxHeight := screenPosFeetY - screenPosBoxTop
+		if boxHeight < 8 {
+			boxHeight = 40
+		}
+		boxHalfW := boxHeight / 4
+		if boxHalfW < 12 {
+			boxHalfW = 12
+		}
+
 		entities = append(entities, Entity{
+			PawnAddr: entityPawn,
 			Health:   health,
 			Team:     teamNum,
 			Name:     name,
@@ -248,9 +277,17 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, sp screenProj
 			Position: Vector2{screenPosFeetX, screenPosFeetY},
 			Bones:    entityBones,
 			HeadPos:  Vector3{screenPosHeadX, screenPosHeadTopY, screenPosHeadBottomY},
-			Rect:     Rectangle{screenPosBoxTop, screenPosFeetX - boxHeight/4, screenPosFeetX + boxHeight/4, screenPosFeetY},
+			Rect:     Rectangle{screenPosBoxTop, screenPosFeetX - boxHalfW, screenPosFeetX + boxHalfW, screenPosFeetY},
 		})
 	}
 
 	return entities
+}
+
+func readViewProjection(procHandle windows.Handle, clientDll uintptr, offsets Offset, width, height float32) screenProjector {
+	var view [16]float32
+	if readSafe(procHandle, clientDll+offsets.DwViewMatrix, &view) != nil {
+		return screenProjector{}
+	}
+	return newScreenProjector(width, height, view)
 }

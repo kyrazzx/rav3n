@@ -9,214 +9,153 @@ import (
 	g "github.com/AllenDang/giu"
 )
 
+func rav3nSidebarDivider() g.Widget {
+	return g.Custom(func() {
+		pos := g.GetCursorScreenPos()
+		_, h := g.GetAvailableRegion()
+		canvas := g.GetCanvas()
+		canvas.AddRectFilled(pos, pos.Add(image.Pt(1, int(h))), colBorder, 0, 0)
+		g.Dummy(1, h).Build()
+	})
+}
+
 func rav3nHeader(wnd *g.MasterWindow) g.Widget {
 	return g.Custom(func() {
 		canvas := g.GetCanvas()
 		pos := g.GetCursorScreenPos()
-		w := g.GetContentRegionAvail().X
+		w, _ := g.GetAvailableRegion()
 		h := float32(52)
 
 		canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), int(h))), colSurfaceHi, 0, 0)
 		canvas.AddLine(pos.Add(image.Pt(0, int(h))), pos.Add(image.Pt(int(w), int(h))), colBorder, 1)
 
-		shimmerW := float32(120)
-		shimmerX := pos.X + uiAnimation.pulse*(w-shimmerW)
-		canvas.AddRectFilled(
-			image.Pt(int(shimmerX), pos.Y+int(h)-2),
-			image.Pt(int(shimmerX+shimmerW), pos.Y+int(h)),
-			withAlpha(colAccent, 0.35+uiAnimation.pulse*0.25), 0, 0,
-		)
-
 		g.SetCursorPos(image.Pt(20, 16))
-		g.Label("RAV3N").Build()
+		g.Style().SetColor(g.StyleColorText, colAccent).To(g.Label("RAV3N")).Build()
 		g.SameLine()
-		g.SetCursorPosX(g.GetCursorPosX() + 8)
+		cursorPos := g.GetCursorPos()
+		g.SetCursorPos(image.Pt(cursorPos.X+8, cursorPos.Y+2))
 		g.Style().SetColor(g.StyleColorText, colTextMuted).To(g.Label("v2.1")).Build()
 
-		g.SetCursorPos(image.Pt(int(w)-130, 14))
-		g.Style().
-			SetColor(g.StyleColorButton, color.RGBA{32, 32, 46, 255}).
-			SetColor(g.StyleColorButtonHovered, color.RGBA{50, 50, 68, 255}).
-			To(g.Button("•").Size(28, 28)).Build()
-
-		g.SameLine()
+		g.SetCursorPos(image.Pt(int(w)-96, 12))
 		g.Style().
 			SetColor(g.StyleColorButton, color.RGBA{46, 28, 32, 255}).
 			SetColor(g.StyleColorButtonHovered, color.RGBA{72, 36, 40, 255}).
 			SetColor(g.StyleColorText, colDanger).
-			To(g.Button("×").Size(28, 28).OnClick(func() { os.Exit(0) })).Build()
+			To(g.Button("×").Size(32, 32).OnClick(func() { os.Exit(0) })).Build()
 
 		g.SetCursorPos(image.Pt(0, 0))
-		drag := g.InvisibleButton().ID("##title_drag").Size(g.Auto, h)
-		drag.Build()
+		g.InvisibleButton().ID("##title_drag").Size(-1, h).Build()
 		if g.IsItemActive() {
-			delta := g.Context.IO().MouseDelta()
+			delta := g.Context.IO().GetMouseDelta()
 			x, y := wnd.GetPos()
 			wnd.SetPos(x+int(delta.X), y+int(delta.Y))
 		}
 
-		g.SetCursorPos(image.Pt(0, int(h)))
+		g.Dummy(-1, h).Build()
 	})
 }
 
 func rav3nSectionLabel(text string) g.Widget {
-	return g.Custom(func() {
-		g.Dummy(0, 6).Build()
-		g.Style().SetColor(g.StyleColorText, colTextDim).To(
-			g.Label(text),
-		).Build()
-		g.Dummy(0, 2).Build()
-	})
+	return g.Style().SetColor(g.StyleColorText, colTextDim).To(g.Label(text))
 }
 
-func rav3nNavItem(id, label, icon string, section string, destY float32) g.Widget {
-	return g.Custom(func() {
-		active := activeSection == section
-		pos := g.GetCursorScreenPos()
-		w := g.GetContentRegionAvail().X
-		h := float32(38)
-		canvas := g.GetCanvas()
-
-		g.SetCursorPos(pos)
-		btn := g.InvisibleButton().ID("##nav_" + id).Size(w, h)
-		btn.Build()
-		hovered := g.IsItemHovered()
-		hoverAnim := easeOutCubic(uiAnimation.animateNavHover(id, hovered))
-
-		if active {
-			bg := withAlpha(colAccent, 0.12+hoverAnim*0.06)
-			canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), int(h))), bg, 6, g.DrawFlagsRoundCornersRight)
-		} else if hoverAnim > 0.01 {
-			bg := withAlpha(colSurfaceHi, 0.35+hoverAnim*0.35)
-			canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), int(h))), bg, 6, g.DrawFlagsRoundCornersRight)
-			canvas.AddRectFilled(
-				image.Pt(int(pos.X), int(pos.Y+6)),
-				image.Pt(int(pos.X)+2, int(pos.Y+h-6)),
-				withAlpha(colAccent, 0.2+hoverAnim*0.5), 2, g.DrawFlagsRoundCornersRight,
-			)
+func rav3nNavButton(label, section string) g.Widget {
+	active := activeSection == section
+	widget := g.Button(label).Size(-1, 36).OnClick(func() {
+		activeSection = section
+		uiAnimation.setSection(section, 0)
+		if section == sectionConfig {
+			configFiles = listProfiles()
 		}
-
-		iconOffset := int(hoverAnim * 3)
-		g.SetCursorPos(image.Pt(int(pos.X)+14+iconOffset, int(pos.Y)+10))
-		g.Style().SetColor(g.StyleColorText, func() color.RGBA {
-			if active {
-				return colAccent
-			}
-			if hoverAnim > 0 {
-				return color.RGBA{
-					R: uint8(lerp(float32(colTextMuted.R), float32(colAccent.R), hoverAnim)),
-					G: uint8(lerp(float32(colTextMuted.G), float32(colAccent.G), hoverAnim)),
-					B: uint8(lerp(float32(colTextMuted.B), float32(colAccent.B), hoverAnim)),
-					A: 255,
-				}
-			}
-			return colTextMuted
-		}()).To(g.Label(icon)).Build()
-
-		g.SameLine()
-		g.SetCursorPosX(g.GetCursorPosX() + 4)
-		g.Style().SetColor(g.StyleColorText, func() color.RGBA {
-			if active {
-				return colText
-			}
-			if hoverAnim > 0 {
-				return color.RGBA{
-					R: uint8(lerp(float32(colTextMuted.R), float32(colText.R), hoverAnim)),
-					G: uint8(lerp(float32(colTextMuted.G), float32(colText.G), hoverAnim)),
-					B: uint8(lerp(float32(colTextMuted.B), float32(colText.B), hoverAnim)),
-					A: 255,
-				}
-			}
-			return colTextMuted
-		}()).To(g.Label(label)).Build()
-
-		if g.IsItemClicked() {
-			activeSection = section
-			uiAnimation.setSection(section, destY)
-			if section == sectionConfig {
-				configFiles = listProfiles()
-			}
-		}
-		g.SetCursorPos(image.Pt(int(pos.X), int(pos.Y+h)))
 	})
+	if active {
+		return g.Style().
+			SetColor(g.StyleColorButton, color.RGBA{48, 32, 72, 255}).
+			SetColor(g.StyleColorButtonHovered, color.RGBA{58, 38, 88, 255}).
+			SetColor(g.StyleColorText, colAccent).
+			To(widget)
+	}
+	return g.Style().
+		SetColor(g.StyleColorButton, color.RGBA{22, 22, 32, 255}).
+		SetColor(g.StyleColorButtonHovered, color.RGBA{32, 32, 46, 255}).
+		SetColor(g.StyleColorText, colTextMuted).
+		To(widget)
 }
 
-func rav3nSidebarIndicator() g.Widget {
-	return g.Custom(func() {
-		canvas := g.GetCanvas()
-		x := float32(g.GetCursorScreenPos().X)
-		y := uiAnimation.navIndicatorY
-		canvas.AddRectFilled(
-			image.Pt(int(x), int(y)),
-			image.Pt(int(x)+3, int(y)+28),
-			colAccent, 2, g.DrawFlagsRoundCornersRight,
-		)
-	})
-}
-
-func rav3nCard(title, subtitle string, width, height float32, glow bool, content g.Layout) g.Widget {
-	return g.Child().Border(true).Size(width, height).Layout(
+func rav3nCard(title, subtitle string, _width, _height float32, glow bool, content g.Layout) g.Widget {
+	borderCol := colBorder
+	bgCol := color.RGBA{20, 20, 30, 255}
+	if glow {
+		borderCol = withAlpha(colAccent, 0.45)
+		bgCol = color.RGBA{24, 20, 36, 255}
+	}
+	return g.Layout{
 		g.Custom(func() {
-			canvas := g.GetCanvas()
 			pos := g.GetCursorScreenPos()
-			w := g.GetContentRegionAvail().X
+			w, _ := g.GetAvailableRegion()
+			canvas := g.GetCanvas()
+			canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), 8)), bgCol, 10, g.DrawFlagsRoundCornersTop)
 			if glow {
-				glowCol := withAlpha(colAccent, 0.05+uiAnimation.pulse*0.12)
-				canvas.AddRectFilled(
-					image.Pt(pos.X-1, pos.Y-1),
-					image.Pt(pos.X+int(w)+1, pos.Y+4),
-					glowCol, 0, 0,
-				)
+				canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), 3)), colAccent, 10, g.DrawFlagsRoundCornersTop)
 			}
-			canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), 4)), colAccent, 0, 0)
+			g.Dummy(w, 8).Build()
 		}),
-		g.Dummy(0, 8),
-		g.Row(
-			g.Custom(func() {
-				g.Style().SetColor(g.StyleColorText, colText).To(g.Label(title)).Build()
-			}),
-		),
-		g.Style().SetColor(g.StyleColorText, colTextMuted).To(
-			g.Label(subtitle),
-		),
-		g.Separator(),
-		g.Dummy(0, 4),
+		g.Dummy(0, 10),
+		g.Style().SetColor(g.StyleColorText, colText).To(g.Label(title)),
+		g.Style().SetColor(g.StyleColorText, colTextMuted).To(g.Label(subtitle)),
+		g.Custom(func() {
+			pos := g.GetCursorScreenPos()
+			w, _ := g.GetAvailableRegion()
+			canvas := g.GetCanvas()
+			canvas.AddLine(pos, pos.Add(image.Pt(int(w), 0)), borderCol, 1)
+			g.Dummy(w, 1).Build()
+		}),
+		g.Dummy(0, 10),
 		content,
-	)
+		g.Dummy(0, 16),
+	}
 }
 
 func rav3nToggle(id, label string, value *bool) g.Widget {
 	return g.Custom(func() {
+		const trackW, trackH = float32(44), float32(22)
+
 		g.Style().SetColor(g.StyleColorText, colText).To(g.Label(label)).Build()
 		g.SameLine()
-		avail := g.GetContentRegionAvail().X
-		g.SetCursorPosX(g.GetCursorPosX() + avail - 44)
+		avail, _ := g.GetAvailableRegion()
+		cursor := g.GetCursorPos()
+		g.SetCursorPos(image.Pt(cursor.X+int(avail)-int(trackW), cursor.Y+1))
 
-		pos := g.GetCursorScreenPos()
+		localPos := g.GetCursorPos()
+		screenPos := g.GetCursorScreenPos()
+
+		on := *value
 		canvas := g.GetCanvas()
-		trackW, trackH := float32(40), float32(20)
-		knobR := float32(7)
-		progress := easeOutCubic(uiAnimation.animateToggle(id, *value))
-
-		trackColor := color.RGBA{36, 36, 50, 255}
-		trackColor = color.RGBA{
-			R: uint8(lerp(float32(trackColor.R), float32(colAccent.R), progress)),
-			G: uint8(lerp(float32(trackColor.G), float32(colAccent.G), progress)),
-			B: uint8(lerp(float32(trackColor.B), float32(colAccent.B), progress)),
-			A: 255,
+		trackOff := color.RGBA{32, 32, 46, 255}
+		trackColor := trackOff
+		if on {
+			trackColor = colAccent
 		}
-		canvas.AddRectFilled(pos, pos.Add(image.Pt(int(trackW), int(trackH))), trackColor, int(trackH/2), g.DrawFlagsRoundCornersAll)
+		canvas.AddRectFilled(
+			screenPos,
+			screenPos.Add(image.Pt(int(trackW), int(trackH))),
+			trackColor, trackH/2, g.DrawFlagsRoundCornersAll,
+		)
+		if !on {
+			canvas.AddRect(screenPos, screenPos.Add(image.Pt(int(trackW), int(trackH))), colBorder, trackH/2, g.DrawFlagsRoundCornersAll, 1)
+		}
+		knobX := float32(screenPos.X) + 11
+		if on {
+			knobX = float32(screenPos.X) + trackW - 11
+		}
+		canvas.AddCircleFilled(image.Pt(int(knobX), screenPos.Y+int(trackH/2)), 8, colText)
 
-		knobX := pos.X + 10 + (trackW-20)*progress
-		canvas.AddCircleFilled(image.Pt(int(knobX), pos.Y+int(trackH/2)), int(knobR), colText, 16)
-
-		g.SetCursorPos(pos)
-		btn := g.InvisibleButton().ID("##toggle_" + id).Size(trackW, trackH)
-		btn.Build()
-		if g.IsItemClicked() {
+		g.SetCursorPos(localPos)
+		g.InvisibleButton().ID("##toggle_" + id).Size(trackW, trackH).Build()
+		if g.IsItemClicked(g.MouseButtonLeft) {
 			*value = !*value
 		}
-		g.Dummy(trackW, trackH).Build()
+		g.Dummy(-1, trackH+8).Build()
 	})
 }
 
@@ -229,7 +168,9 @@ func rav3nSliderFloat(value *float32, min, max float32, label, format string) g.
 				g.Label(fmt.Sprintf(format, *value)),
 			),
 		),
+		g.Dummy(0, 2),
 		g.SliderFloat(value, min, max).Size(-1),
+		g.Dummy(0, 6),
 	}
 }
 
@@ -247,85 +188,144 @@ func rav3nSliderInt(value *int32, min, max int32, label string) g.Widget {
 }
 
 func rav3nCombo(label string, preview string, items []string, selected *int32, onChange func()) g.Widget {
-	return g.Custom(func() {
-		g.Style().SetColor(g.StyleColorText, colText).To(g.Label(label)).Build()
-		g.Combo(label+"##combo", preview, items, selected).Size(-1).OnChange(onChange).Build()
-	})
+	return g.Layout{
+		g.Style().SetColor(g.StyleColorText, colText).To(g.Label(label)),
+		g.Dummy(0, 4),
+		g.Combo("##"+label, preview, items, selected).Size(-1).OnChange(onChange),
+		g.Dummy(0, 6),
+	}
 }
 
 func rav3nESPPreview() g.Widget {
 	return g.Custom(func() {
 		pos := g.GetCursorScreenPos()
-		w := g.GetContentRegionAvail().X
+		w, _ := g.GetAvailableRegion()
 		h := float32(340)
 		canvas := g.GetCanvas()
 
-		canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), int(h))), color.RGBA{14, 14, 20, 255}, 8, g.DrawFlagsRoundCornersAll)
-		canvas.AddRect(pos, pos.Add(image.Pt(int(w), int(h))), colBorder, 8, g.DrawFlagsRoundCornersAll, 1)
+		canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), int(h))), color.RGBA{12, 12, 18, 255}, 12, g.DrawFlagsRoundCornersAll)
+		canvas.AddRect(pos, pos.Add(image.Pt(int(w), int(h))), colBorder, 12, g.DrawFlagsRoundCornersAll, 1)
 
-		cx := pos.X + w/2
-		top := pos.Y + 40
-		bottom := pos.Y + h - 30
-		boxW := float32(70)
+		cx := float32(pos.X) + w/2
+		top := float32(pos.Y) + 44
+		bottom := float32(pos.Y) + h - 36
+		boxW := float32(76)
+		left := int(cx - boxW/2)
+		right := int(cx + boxW/2)
+		topI := int(top)
+		bottomI := int(bottom)
 
-		if BoxRendering {
-			boxCol := colTerrorist
-			if TeamCheck {
-				boxCol = colCT
+		boxCol := colTerrorist
+		if TeamCheck {
+			boxCol = colCT
+		}
+		fillCol := withAlpha(boxCol, 0.75)
+
+		headY := top + 20
+		neckY := top + 40
+		chestY := top + 82
+		pelvisY := top + 132
+		previewBones := [][2]image.Point{
+			{image.Pt(int(cx), int(headY)), image.Pt(int(cx), int(neckY))},
+			{image.Pt(int(cx), int(neckY)), image.Pt(int(cx), int(chestY))},
+			{image.Pt(int(cx), int(chestY)), image.Pt(int(cx), int(pelvisY))},
+			{image.Pt(int(cx), int(pelvisY)), image.Pt(int(cx-18), int(bottom-10))},
+			{image.Pt(int(cx), int(pelvisY)), image.Pt(int(cx+18), int(bottom-10))},
+			{image.Pt(int(cx), int(neckY)), image.Pt(int(cx-28), int(chestY+20))},
+			{image.Pt(int(cx-28), int(chestY+20)), image.Pt(int(cx-36), int(chestY+52))},
+			{image.Pt(int(cx), int(neckY)), image.Pt(int(cx+28), int(chestY+20))},
+			{image.Pt(int(cx+28), int(chestY+20)), image.Pt(int(cx+36), int(chestY+52))},
+		}
+
+		if BodyHighlightRendering {
+			for _, seg := range previewBones {
+				canvas.AddLine(seg[0], seg[1], fillCol, 14)
 			}
-			canvas.AddRect(
-				image.Pt(int(cx-boxW/2), int(top)),
-				image.Pt(int(cx+boxW/2), int(bottom)),
-				boxCol, 0, 0, 2,
-			)
+			canvas.AddCircleFilled(image.Pt(int(cx), int(headY)), 14, fillCol)
+		}
+		if BoxRendering {
+			drawPreviewCornerBox(canvas, left, topI, right, bottomI, boxCol, 2)
 		}
 
 		if HealthBarRendering {
-			barX := int(cx - boxW/2 - 6)
+			barX := left - 8
 			canvas.AddRectFilled(
-				image.Pt(barX, int(bottom)),
-				image.Pt(barX+3, int(top+(bottom-top)*0.3)),
-				colSuccess, 0, 0,
+				image.Pt(barX, bottomI),
+				image.Pt(barX+4, topI),
+				color.RGBA{24, 24, 32, 255}, 2, g.DrawFlagsRoundCornersAll,
+			)
+			fillTop := topI + int(float32(bottomI-topI)*0.35)
+			canvas.AddRectFilled(
+				image.Pt(barX+1, bottomI-1),
+				image.Pt(barX+3, fillTop),
+				colSuccess, 2, g.DrawFlagsRoundCornersAll,
 			)
 		}
 
 		if SkeletonRendering {
-			skCol := withAlpha(colText, 0.7)
-			headY := top + 18
-			neckY := top + 38
-			chestY := top + 80
-			pelvisY := top + 130
-			canvas.AddLine(image.Pt(int(cx), int(headY)), image.Pt(int(cx), int(pelvisY)), skCol, 1.5)
-			canvas.AddLine(image.Pt(int(cx), int(neckY)), image.Pt(int(cx-28), int(chestY+20)), skCol, 1.5)
-			canvas.AddLine(image.Pt(int(cx), int(neckY)), image.Pt(int(cx+28), int(chestY+20)), skCol, 1.5)
-			canvas.AddLine(image.Pt(int(cx), int(pelvisY)), image.Pt(int(cx-18), int(bottom-10)), skCol, 1.5)
-			canvas.AddLine(image.Pt(int(cx), int(pelvisY)), image.Pt(int(cx+18), int(bottom-10)), skCol, 1.5)
+			skCol := withAlpha(boxCol, 0.85)
+			headY := top + 20
+			neckY := top + 40
+			chestY := top + 82
+			pelvisY := top + 132
+			canvas.AddLine(image.Pt(int(cx), int(headY)), image.Pt(int(cx), int(pelvisY)), skCol, 2)
+			canvas.AddLine(image.Pt(int(cx), int(neckY)), image.Pt(int(cx-28), int(chestY+20)), skCol, 2)
+			canvas.AddLine(image.Pt(int(cx), int(neckY)), image.Pt(int(cx+28), int(chestY+20)), skCol, 2)
+			canvas.AddLine(image.Pt(int(cx), int(pelvisY)), image.Pt(int(cx-18), int(bottom-10)), skCol, 2)
+			canvas.AddLine(image.Pt(int(cx), int(pelvisY)), image.Pt(int(cx+18), int(bottom-10)), skCol, 2)
 		}
 
 		if HeadCircle {
-			canvas.AddCircle(image.Pt(int(cx), int(top+18)), 14, colAccent, 16, 1.5)
+			canvas.AddCircle(image.Pt(int(cx), int(top+20)), 15, withAlpha(boxCol, 0.5), 20, 1)
+			canvas.AddCircle(image.Pt(int(cx), int(top+20)), 13, boxCol, 20, 2)
 		}
 
 		if NameRendering {
-			g.SetCursorPos(image.Pt(int(cx-30), int(top-18)))
-			g.Style().SetColor(g.StyleColorText, colText).To(g.Label("Player")).Build()
+			tagW := 56
+			canvas.AddRectFilled(
+				image.Pt(int(cx)-tagW/2, topI-22),
+				image.Pt(int(cx)+tagW/2, topI-6),
+				color.RGBA{18, 18, 26, 230}, 4, g.DrawFlagsRoundCornersAll,
+			)
+			canvas.AddText(image.Pt(int(cx)-22, topI-20), colText, "Player")
 		}
 
 		g.Dummy(w, h).Build()
 	})
 }
 
+func drawPreviewCornerBox(canvas *g.Canvas, left, top, right, bottom int, col color.RGBA, thickness float32) {
+	cl := int(float32(right-left) * 0.22)
+	if cl < 8 {
+		cl = 8
+	}
+	if cl > 16 {
+		cl = 16
+	}
+	draw := func(x1, y1, x2, y2 int) {
+		canvas.AddLine(image.Pt(x1, y1), image.Pt(x2, y2), col, thickness)
+	}
+	draw(left, top, left+cl, top)
+	draw(left, top, left, top+cl)
+	draw(right, top, right-cl, top)
+	draw(right, top, right, top+cl)
+	draw(left, bottom, left+cl, bottom)
+	draw(left, bottom, left, bottom-cl)
+	draw(right, bottom, right-cl, bottom)
+	draw(right, bottom, right, bottom-cl)
+}
+
 func rav3nStatusBar() g.Widget {
 	return g.Custom(func() {
 		canvas := g.GetCanvas()
 		pos := g.GetCursorScreenPos()
-		w := g.GetContentRegionAvail().X
+		w, _ := g.GetAvailableRegion()
 		h := float32(28)
 		canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), int(h))), colSidebar, 0, 0)
 		canvas.AddLine(pos, pos.Add(image.Pt(int(w), 0)), colBorder, 1)
 
 		dotCol := colSuccess
-		canvas.AddCircleFilled(pos.Add(image.Pt(14, 14)), 4, dotCol, 8)
+		canvas.AddCircleFilled(pos.Add(image.Pt(14, 14)), 4, dotCol)
 
 		g.SetCursorPos(image.Pt(26, 6))
 		g.Style().SetColor(g.StyleColorText, colTextMuted).To(
@@ -334,27 +334,31 @@ func rav3nStatusBar() g.Widget {
 
 		g.SetCursorPos(image.Pt(int(w)-120, 6))
 		g.Style().SetColor(g.StyleColorText, colTextDim).To(g.Label("RAV3N v2.1")).Build()
-		g.SetCursorPos(image.Pt(0, int(h)))
+		g.Dummy(-1, h).Build()
 	})
 }
 
 func rav3nPageTitle(title, subtitle string) g.Widget {
-	return g.Custom(func() {
-		g.Dummy(0, 8).Build()
-		g.Style().SetColor(g.StyleColorText, colText).To(
-			g.Label(title),
-		).Build()
-		g.Style().SetColor(g.StyleColorText, colTextMuted).To(
-			g.Label(subtitle),
-		).Build()
-		g.Dummy(0, 12).Build()
-	})
+	return g.Layout{
+		g.Style().SetColor(g.StyleColorText, colText).To(g.Label(title)),
+		g.Dummy(0, 4),
+		g.Custom(func() {
+			pos := g.GetCursorScreenPos()
+			w, _ := g.GetAvailableRegion()
+			canvas := g.GetCanvas()
+			canvas.AddRectFilled(pos, pos.Add(image.Pt(48, 3)), colAccent, 2, g.DrawFlagsRoundCornersAll)
+			g.Dummy(w, 3).Build()
+		}),
+		g.Dummy(0, 6),
+		g.Style().SetColor(g.StyleColorText, colTextMuted).To(g.Label(subtitle)),
+		g.Dummy(0, 16),
+	}
 }
 
 func rav3nPerfGraph() g.Widget {
 	return g.Custom(func() {
 		pos := g.GetCursorScreenPos()
-		w := g.GetContentRegionAvail().X
+		w, _ := g.GetAvailableRegion()
 		h := float32(140)
 		canvas := g.GetCanvas()
 
@@ -362,10 +366,10 @@ func rav3nPerfGraph() g.Widget {
 		canvas.AddRect(pos, pos.Add(image.Pt(int(w), int(h))), colBorder, 8, g.DrawFlagsRoundCornersAll, 1)
 
 		pad := float32(12)
-		graphLeft := pos.X + pad
-		graphRight := pos.X + w - pad
-		graphTop := pos.Y + pad + 8
-		graphBottom := pos.Y + h - pad
+		graphLeft := float32(pos.X) + pad
+		graphRight := float32(pos.X) + w - pad
+		graphTop := float32(pos.Y) + pad + 8
+		graphBottom := float32(pos.Y) + h - pad
 		graphW := graphRight - graphLeft
 		graphH := graphBottom - graphTop
 
@@ -403,16 +407,9 @@ func rav3nPerfGraph() g.Widget {
 		}
 		drawSeries(overlayAsFPS, targetFPS, colSuccess)
 
-		g.SetCursorPos(image.Pt(int(pos.X)+12, int(pos.Y)+8))
-		g.Style().SetColor(g.StyleColorText, colTextMuted).To(g.Label("Performance Monitor")).Build()
-		g.SetCursorPos(image.Pt(int(pos.X)+12, int(pos.Y)+int(h)-22))
-		g.Style().SetColor(g.StyleColorText, colAccent).To(
-			g.Label(fmt.Sprintf("GUI %.0f FPS", perfGuiFPS)),
-		).Build()
-		g.SameLine()
-		g.Style().SetColor(g.StyleColorText, colSuccess).To(
-			g.Label(fmt.Sprintf("  Overlay %.1f ms", perfOverlayMs)),
-		).Build()
+		canvas.AddText(image.Pt(int(pos.X)+12, int(pos.Y)+8), colTextMuted, "Performance Monitor")
+		canvas.AddText(image.Pt(int(pos.X)+12, int(pos.Y)+int(h)-22), colAccent, fmt.Sprintf("GUI %3.0f FPS", perfGuiFPS))
+		canvas.AddText(image.Pt(int(pos.X)+120, int(pos.Y)+int(h)-22), colSuccess, fmt.Sprintf("Overlay %5.1f ms", perfOverlayMs))
 
 		g.Dummy(w, h).Build()
 	})

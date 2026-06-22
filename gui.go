@@ -27,7 +27,7 @@ const (
 
 var (
 	activeSection = sectionAimbot
-	sidebarWidth  float32 = 220
+	sidebarWidth  float32 = 200
 
 	keyNames        []string
 	keyMap          map[string]int32
@@ -53,8 +53,9 @@ type guiProfile struct {
 	TeamCheck            bool    `json:"teamCheck"`
 	HeadCircle           bool    `json:"headCircle"`
 	SkeletonRendering    bool    `json:"skeletonRendering"`
-	BoxRendering         bool    `json:"boxRendering"`
-	NameRendering        bool    `json:"nameRendering"`
+	BoxRendering          bool    `json:"boxRendering"`
+	BodyHighlightRendering bool   `json:"bodyHighlightRendering"`
+	NameRendering         bool    `json:"nameRendering"`
 	HealthBarRendering   bool    `json:"healthBarRendering"`
 	HealthTextRendering  bool    `json:"healthTextRendering"`
 	FrameDelay           int32   `json:"frameDelay"`
@@ -118,8 +119,9 @@ func snapshotProfile() guiProfile {
 		TeamCheck:           TeamCheck,
 		HeadCircle:          HeadCircle,
 		SkeletonRendering:   SkeletonRendering,
-		BoxRendering:        BoxRendering,
-		NameRendering:       NameRendering,
+		BoxRendering:          BoxRendering,
+		BodyHighlightRendering: BodyHighlightRendering,
+		NameRendering:         NameRendering,
 		HealthBarRendering:  HealthBarRendering,
 		HealthTextRendering: HealthTextRendering,
 		FrameDelay:          FrameDelay,
@@ -144,6 +146,7 @@ func applyProfile(p guiProfile) {
 	HeadCircle = p.HeadCircle
 	SkeletonRendering = p.SkeletonRendering
 	BoxRendering = p.BoxRendering
+	BodyHighlightRendering = p.BodyHighlightRendering
 	NameRendering = p.NameRendering
 	HealthBarRendering = p.HealthBarRendering
 	HealthTextRendering = p.HealthTextRendering
@@ -195,6 +198,7 @@ func init() {
 	applyThemePreset(selectedThemeIndex)
 	configNameInput = "default"
 	exportNameInput = "my_profile"
+	configFiles = listProfiles()
 	keyMap = map[string]int32{
 		"Mouse 4":    0x05,
 		"Mouse 5":    0x06,
@@ -250,98 +254,97 @@ func init() {
 
 func loop(wnd *g.MasterWindow) {
 	uiAnimation.tick()
-	if io := g.Context.IO(); io != nil && io.Framerate > 0 {
-		recordGuiFrame(io.Framerate)
-	} else if uiAnimation.lastDelta > 0 {
+	if uiAnimation.lastDelta > 0 {
 		recordGuiFrame(1 / uiAnimation.lastDelta)
 	}
 
-	applyRav3nTheme().To(
-		g.SingleWindow().Layout(
-			g.Custom(func() {
-				canvas := g.GetCanvas()
-				pos := g.GetCursorScreenPos()
-				w, h := g.GetContentRegionAvail().X, g.GetContentRegionAvail().Y
-				canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), int(h))), colBg, 0, 0)
-			}),
-			rav3nHeader(wnd),
-			g.SplitLayout(g.DirectionHorizontal, &sidebarWidth,
-				buildSidebar(),
-				buildContentArea(),
+	theme := applyRav3nTheme()
+	theme.Push()
+	g.Custom(func() {
+		canvas := g.GetCanvas()
+		pos := g.GetCursorScreenPos()
+		w, h := g.GetAvailableRegion()
+		canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), int(h))), colBg, 14, g.DrawFlagsRoundCornersAll)
+		g.Dummy(w, h).Build()
+	})
+	g.SingleWindow().Layout(
+		rav3nHeader(wnd),
+		g.Child().Border(false).Size(-1, -1).Layout(
+			g.Row(
+				g.Child().ID("##rav3n_sidebar").Border(false).Size(sidebarWidth, -1).Layout(
+					g.Style().SetStyle(g.StyleVarWindowPadding, 12, 14).To(buildSidebarContent()),
+				),
+				rav3nSidebarDivider(),
+				g.Child().
+					ID("##rav3n_content_scroll").
+					Border(false).
+					Size(-1, -1).
+					Flags(g.WindowFlagsAlwaysVerticalScrollbar).
+					Layout(
+						g.Style().SetStyle(g.StyleVarWindowPadding, 20, 16).To(buildContentArea()),
+					),
 			),
-			rav3nStatusBar(),
 		),
-	).Build()
+		rav3nStatusBar(),
+	)
+	theme.Pop()
 }
 
-func buildSidebar() g.Widget {
-	return g.Child().Border(false).Size(sidebarWidth, -1).Layout(
-		g.Custom(func() {
-			canvas := g.GetCanvas()
-			pos := g.GetCursorScreenPos()
-			w := g.GetContentRegionAvail().X
-			h := g.GetContentRegionAvail().Y
-			canvas.AddRectFilled(pos, pos.Add(image.Pt(int(w), int(h))), colSidebar, 0, 0)
-		}),
-		g.Dummy(0, 20),
-		g.Custom(func() {
-			g.SetCursorPos(image.Pt(20, g.GetCursorPosY()))
-			g.Style().SetColor(g.StyleColorText, colAccent).To(g.Label("R A V 3 N")).Build()
-			g.Dummy(0, 4).Build()
-			g.SetCursorPosX(20)
-			g.Style().SetColor(g.StyleColorText, colTextDim).To(g.Label("external suite")).Build()
-		}),
-		g.Dummy(0, 24),
-		rav3nSidebarIndicator(),
+func buildSidebarContent() g.Widget {
+	return g.Layout{
+		g.Dummy(0, 16),
+		g.Style().SetColor(g.StyleColorText, colAccent).To(g.Label("R A V 3 N")),
+		g.Style().SetColor(g.StyleColorText, colTextDim).To(g.Label("external suite")),
+		g.Separator(),
 		rav3nSectionLabel("COMBAT"),
-		rav3nNavItem("aimbot", "Aimbot", "◎", sectionAimbot, 108),
-		g.Dummy(0, 8),
+		rav3nNavButton("Aimbot", sectionAimbot),
+		g.Dummy(0, 4),
 		rav3nSectionLabel("VISUALS"),
-		rav3nNavItem("esp", "Player ESP", "◈", sectionESP, 178),
-		g.Dummy(0, 8),
+		rav3nNavButton("Player ESP", sectionESP),
+		g.Dummy(0, 4),
 		rav3nSectionLabel("MISC"),
-		rav3nNavItem("misc", "Settings", "⚙", sectionMisc, 248),
-		rav3nNavItem("config", "Configs", "◉", sectionConfig, 286),
-		g.Dummy(-1, 20),
-		g.Custom(func() {
-			g.SetCursorPosX(16)
-			g.Style().
-				SetColor(g.StyleColorButton, color.RGBA{36, 24, 32, 255}).
-				SetColor(g.StyleColorButtonHovered, color.RGBA{56, 28, 36, 255}).
-				SetColor(g.StyleColorText, colDanger).
-				To(g.Button("Exit Application").Size(-16, 34).OnClick(func() { os.Exit(0) })).Build()
-		}),
-	)
+		rav3nNavButton("Settings", sectionMisc),
+		rav3nNavButton("Configs", sectionConfig),
+		g.Dummy(-1, 12),
+		g.Style().
+			SetColor(g.StyleColorButton, color.RGBA{36, 24, 32, 255}).
+			SetColor(g.StyleColorButtonHovered, color.RGBA{56, 28, 36, 255}).
+			SetColor(g.StyleColorText, colDanger).
+			To(g.Button("Exit Application").Size(-1, 34).OnClick(func() { os.Exit(0) })),
+	}
 }
 
 func buildContentArea() g.Widget {
-	return g.Style().
-		SetStyleFloat(g.StyleVarAlpha, easeOutCubic(uiAnimation.pageAlpha)).
-		To(g.Custom(func() {
-			offsetX := int(uiAnimation.pageOffsetX())
-			g.SetCursorPos(image.Pt(20+offsetX, g.GetCursorPosY()))
-			switch activeSection {
-			case sectionAimbot:
-				buildAimbotPage()
-			case sectionESP:
-				buildESPPage()
-			case sectionMisc:
-				buildMiscPage()
-			case sectionConfig:
-				buildConfigPage()
-			}
-		}))
+	return g.Layout{
+		g.Dummy(0, 8),
+		activePage(),
+		g.Dummy(0, 48),
+	}
 }
 
-func buildAimbotPage() {
-	rav3nPageTitle("Combat", "Precision assistance & recoil control").Build()
+func activePage() g.Widget {
+	switch activeSection {
+	case sectionAimbot:
+		return buildAimbotPage()
+	case sectionESP:
+		return buildESPPage()
+	case sectionMisc:
+		return buildMiscPage()
+	case sectionConfig:
+		return buildConfigPage()
+	default:
+		return g.Layout{}
+	}
+}
 
-	g.Row(
-		rav3nCard("Aimbot", "Target acquisition & smoothing", 340, 0, AimbotEnabled, g.Layout{
+func buildAimbotPage() g.Widget {
+	return g.Layout{
+		rav3nPageTitle("Combat", "Precision assistance & recoil control"),
+		rav3nCard("Aimbot", "Target acquisition & smoothing", -1, 0, AimbotEnabled, g.Layout{
 			rav3nToggle("aimbot_enabled", "Enabled", &AimbotEnabled),
 			g.Dummy(0, 4),
 			rav3nSliderFloat(&AimbotFOV, 1, 500, "Field of View", "%.0f"),
-			rav3nSliderFloat(&AimbotSmoothing, 1, 50, "Smoothing", "%.1f"),
+			rav3nSliderFloat(&AimbotSmoothing, 1, 30, "Smoothing", "%.1f"),
 			rav3nCombo("Activation Key", keyNames[selectedKeyIndex], keyNames, &selectedKeyIndex, func() {
 				AimbotKey = keyMap[keyNames[selectedKeyIndex]]
 			}),
@@ -349,8 +352,8 @@ func buildAimbotPage() {
 				AimbotTarget = aimbotTargetMap[aimbotTargetNames[selectedAimbotTargetIndex]]
 			}),
 		}),
-		g.Dummy(12, 0),
-		rav3nCard("Recoil Control", "Weapon-specific compensation", 340, 0, RecoilEnabled, g.Layout{
+		g.Dummy(0, 12),
+		rav3nCard("Recoil Control", "Weapon-specific compensation", -1, 0, RecoilEnabled, g.Layout{
 			rav3nToggle("recoil_enabled", "Enabled", &RecoilEnabled),
 			g.Dummy(0, 4),
 			rav3nCombo("Weapon Preset", weaponNames[selectedWeaponIndex], weaponNames, &selectedWeaponIndex, func() {
@@ -367,14 +370,14 @@ func buildAimbotPage() {
 			rav3nSliderFloat(&RecoilYAxis, 0, 5, "Compensate Y", "%.2f"),
 			rav3nSliderFloat(&RecoilSmooth, 1, 5, "Smooth Factor", "%.2f"),
 		}),
-	).Build()
+		g.Dummy(0, 16),
+	}
 }
 
-func buildESPPage() {
-	rav3nPageTitle("Visuals", "Overlay elements & ESP preview").Build()
-
-	g.Row(
-		rav3nCard("ESP Elements", "Toggle overlay components", 340, 0, true, g.Layout{
+func buildESPPage() g.Widget {
+	return g.Layout{
+		rav3nPageTitle("Visuals", "Overlay elements & ESP preview"),
+		rav3nCard("ESP Elements", "Toggle overlay components", -1, 0, true, g.Layout{
 			rav3nToggle("esp_team_filter", "Team Filter", &TeamCheck),
 			g.Dummy(0, 2),
 			g.Style().SetColor(g.StyleColorText, colTextDim).To(
@@ -382,24 +385,31 @@ func buildESPPage() {
 			),
 			g.Separator(),
 			rav3nToggle("esp_box", "Bounding Boxes", &BoxRendering),
+			rav3nToggle("esp_body", "Body Highlight", &BodyHighlightRendering),
+			g.Style().SetColor(g.StyleColorText, colTextDim).To(
+				g.Label("Filled silhouette along player bones"),
+			),
+			g.Dummy(0, 4),
 			rav3nToggle("esp_skeleton", "Skeleton", &SkeletonRendering),
 			rav3nToggle("esp_head", "Head Circle", &HeadCircle),
 			rav3nToggle("esp_name", "Player Names", &NameRendering),
 			rav3nToggle("esp_hpbar", "Health Bar", &HealthBarRendering),
 			rav3nToggle("esp_hptext", "Health Text", &HealthTextRendering),
 		}),
-		g.Dummy(12, 0),
-		rav3nCard("Live Preview", "Real-time ESP visualization", 340, 0, true, g.Layout{
-			rav3nESPPreview(),
+		g.Dummy(0, 12),
+		rav3nCard("Live Preview", "Real-time ESP visualization", -1, 0, true, g.Layout{
+			g.Child().ID("##esp_preview_panel").Border(false).Size(-1, 340).Flags(g.WindowFlagsNoScrollbar|g.WindowFlagsNoScrollWithMouse).Layout(
+				rav3nESPPreview(),
+			),
 		}),
-	).Build()
+		g.Dummy(0, 16),
+	}
 }
 
-func buildMiscPage() {
-	rav3nPageTitle("Settings", "Performance & application info").Build()
-
-	g.Row(
-		rav3nCard("Performance", "Frame pacing & resource usage", 340, 0, true, g.Layout{
+func buildMiscPage() g.Widget {
+	return g.Layout{
+		rav3nPageTitle("Settings", "Performance & application info"),
+		rav3nCard("Performance", "Frame pacing & resource usage", -1, 0, true, g.Layout{
 			g.Style().SetColor(g.StyleColorText, colTextMuted).To(
 				g.Label("Higher values reduce CPU usage"),
 			),
@@ -410,10 +420,12 @@ func buildMiscPage() {
 				themePresets[0].Name, themePresets[1].Name, themePresets[2].Name,
 			}, &selectedThemeIndex, func() { applyThemePreset(selectedThemeIndex) }),
 			g.Dummy(0, 10),
-			rav3nPerfGraph(),
+			g.Child().ID("##perf_graph_panel").Border(false).Size(-1, 140).Flags(g.WindowFlagsNoScrollbar).Layout(
+				rav3nPerfGraph(),
+			),
 		}),
-		g.Dummy(12, 0),
-		rav3nCard("About", "RAV3N external overlay", 340, 0, false, g.Layout{
+		g.Dummy(0, 12),
+		rav3nCard("About", "RAV3N external overlay", -1, 0, false, g.Layout{
 			g.Style().SetColor(g.StyleColorText, colText).To(g.Label("RAV3N v2.1")),
 			g.Style().SetColor(g.StyleColorText, colTextMuted).To(
 				g.Label("Counter-Strike 2 external overlay"),
@@ -424,23 +436,23 @@ func buildMiscPage() {
 				g.Label("Offsets: a2x/cs2-dumper"),
 			),
 			g.Style().SetColor(g.StyleColorText, colTextDim).To(
-				g.Label("Auto-refresh every 6 hours"),
+				g.Label("Auto-refresh on startup"),
 			),
 		}),
-	).Build()
+		g.Dummy(0, 16),
+	}
 }
 
-func buildConfigPage() {
-	configFiles = listProfiles()
+func buildConfigPage() g.Widget {
 	if len(configFiles) == 0 {
 		configFiles = []string{"<none>"}
 		configSelected = 0
 	} else if int(configSelected) >= len(configFiles) {
 		configSelected = int32(len(configFiles) - 1)
 	}
-	rav3nPageTitle("Configs", "Save, load and share premium profiles").Build()
-	g.Row(
-		rav3nCard("Profile Manager", "Persistent JSON configs", 340, 0, true, g.Layout{
+	return g.Layout{
+		rav3nPageTitle("Configs", "Save, load and share premium profiles"),
+		rav3nCard("Profile Manager", "Persistent JSON configs", -1, 0, true, g.Layout{
 			g.Label("Profile Name"),
 			g.InputText(&configNameInput).Size(-1),
 			g.Dummy(0, 6),
@@ -489,8 +501,8 @@ func buildConfigPage() {
 			g.Label("Available Profiles"),
 			g.Combo("##profiles", configFiles[configSelected], configFiles, &configSelected).Size(-1),
 		}),
-		g.Dummy(12, 0),
-		rav3nCard("Share & Theme", "Export/import + UI customization", 340, 0, true, g.Layout{
+		g.Dummy(0, 12),
+		rav3nCard("Share & Theme", "Export/import + UI customization", -1, 0, true, g.Layout{
 			g.Label("Export Name"),
 			g.InputText(&exportNameInput).Size(-1),
 			g.Dummy(0, 6),
@@ -529,10 +541,11 @@ func buildConfigPage() {
 			g.Dummy(0, 6),
 			g.Style().SetColor(g.StyleColorText, colTextMuted).To(g.Label(fmt.Sprintf("Status: %s", configStatus))),
 		}),
-	).Build()
+		g.Dummy(0, 16),
+	}
 }
 
 func RunGui() {
-	wnd := g.NewMasterWindow("RAV3N", 1020, 680, g.MasterWindowFlagsFrameless)
+	wnd := g.NewMasterWindow("RAV3N", 1100, 780, g.MasterWindowFlagsFrameless)
 	wnd.Run(func() { loop(wnd) })
 }

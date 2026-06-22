@@ -51,6 +51,7 @@ type uiAnim struct {
 	pulse            float32
 	started          time.Time
 	lastDelta        float32
+	lastFrameAt      time.Time
 	toggleState      map[string]float32
 	navHover         map[string]float32
 }
@@ -102,12 +103,14 @@ func easeOutCubic(t float32) float32 {
 
 func (a *uiAnim) tick() float32 {
 	dt := float32(0.016)
-	if io := g.Context.IO(); io != nil {
-		dt = io.DeltaTime()
+	now := time.Now()
+	if !a.lastFrameAt.IsZero() {
+		dt = float32(now.Sub(a.lastFrameAt).Seconds())
 		if dt <= 0 || dt > 0.1 {
 			dt = 0.016
 		}
 	}
+	a.lastFrameAt = now
 	a.pulse = float32(math.Sin(float64(time.Since(a.started).Seconds())*2.2))*0.5 + 0.5
 	a.navIndicatorY = lerp(a.navIndicatorY, a.navIndicatorDest, clamp01(dt*14))
 	a.pageAlpha = lerp(a.pageAlpha, 1, clamp01(dt*10))
@@ -198,15 +201,16 @@ func applyRav3nTheme() *g.StyleSetter {
 		SetColor(g.StyleColorScrollbarGrab, color.RGBA{50, 50, 68, 255}).
 		SetColor(g.StyleColorScrollbarGrabHovered, colAccentSoft).
 		SetColor(g.StyleColorScrollbarGrabActive, colAccent).
-		SetStyleFloat(g.StyleVarWindowRounding, 10).
-		SetStyleFloat(g.StyleVarChildRounding, 8).
-		SetStyleFloat(g.StyleVarFrameRounding, 6).
-		SetStyleFloat(g.StyleVarGrabRounding, 10).
-		SetStyleFloat(g.StyleVarScrollbarRounding, 8).
-		SetStyleFloat(g.StyleVarWindowPadding, 0).
-		SetStyleFloat(g.StyleVarFramePadding, 10, 6).
-		SetStyleFloat(g.StyleVarItemSpacing, 10, 8).
-		SetStyleFloat(g.StyleVarIndentSpacing, 18)
+		SetStyleFloat(g.StyleVarWindowRounding, 14).
+		SetStyleFloat(g.StyleVarChildRounding, 12).
+		SetStyleFloat(g.StyleVarFrameRounding, 8).
+		SetStyleFloat(g.StyleVarGrabRounding, 8).
+		SetStyleFloat(g.StyleVarScrollbarRounding, 10).
+		SetStyleFloat(g.StyleVarPopupRounding, 10).
+		SetStyle(g.StyleVarWindowPadding, 0, 0).
+		SetStyle(g.StyleVarFramePadding, 12, 8).
+		SetStyle(g.StyleVarItemSpacing, 12, 10).
+		SetStyleFloat(g.StyleVarIndentSpacing, 20)
 }
 
 func withAlpha(c color.RGBA, alpha float32) color.RGBA {
