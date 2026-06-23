@@ -1,5 +1,4 @@
 package main
-
 import (
 	"fmt"
 	"log"
@@ -8,16 +7,14 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
-
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 )
-
 const (
-	stillActive = 259
-	targetFPS   = 120
+	stillActive        = 259
+	targetFPS          = 120
+	exitCheckInterval  = 60
 )
-
 var (
 	TeamCheck           = true
 	HeadCircle          = true
@@ -38,14 +35,11 @@ var (
 	RecoilXAxis         float32 = 0.00
 	RecoilYAxis         float32 = 2.00
 	RecoilSmooth        float32 = 1.00
-
 	shotsFired int32 = 0
 )
-
 var (
 	user32                     = windows.NewLazySystemDLL("user32.dll")
 	gdi32                      = windows.NewLazySystemDLL("gdi32.dll")
-	getSystemMetrics           = user32.NewProc("GetSystemMetrics")
 	setLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
 	showCursor                 = user32.NewProc("ShowCursor")
 	fillRect                   = user32.NewProc("FillRect")
@@ -57,9 +51,6 @@ var (
 	getAsyncKeyState           = user32.NewProc("GetAsyncKeyState")
 	mouseEvent                 = user32.NewProc("mouse_event")
 )
-
-func init() {}
-
 func logAndSleep(message string, err error) {
 	log.Printf("%s: %v\n", message, err)
 	time.Sleep(5 * time.Second)
@@ -102,7 +93,6 @@ func initWindow(width, height int32) win.HWND {
 	return hwnd
 }
 
-
 func recoilControl() {
 	if !RecoilEnabled {
 		return
@@ -123,31 +113,26 @@ func recoilControl() {
 func runOverlay(offsets Offset) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-
 	pid, err := findProcessId("cs2.exe")
 	if err != nil {
 		logAndSleep("Error finding process ID, is cs2.exe running?", err)
 		return
 	}
-
 	gameWnd := findGameWindow(pid)
 	if gameWnd == 0 {
 		logAndSleep("Could not find CS2 window", fmt.Errorf("hwnd not found"))
 		return
 	}
-
 	area := getGameClientArea(gameWnd)
 	if area.width <= 0 || area.height <= 0 {
 		area.width, area.height = 1920, 1080
 	}
-
 	hwnd := initWindow(area.width, area.height)
 	if hwnd == 0 {
 		return
 	}
 	defer win.DestroyWindow(hwnd)
 	syncOverlayToGame(hwnd, gameWnd)
-
 	clientDll, err := getModuleBaseAddress(pid, "client.dll")
 	if err != nil {
 		logAndSleep("Error getting client.dll base address", err)
@@ -159,14 +144,12 @@ func runOverlay(offsets Offset) {
 		return
 	}
 	defer windows.CloseHandle(procHandle)
-
 	hdc := win.GetDC(hwnd)
 	if hdc == 0 {
 		logAndSleep("Error getting device context", fmt.Errorf("%v", win.GetLastError()))
 		return
 	}
 	defer win.ReleaseDC(hwnd, hdc)
-
 	memhdc := win.CreateCompatibleDC(hdc)
 	memBitmap := win.CreateCompatibleBitmap(hdc, area.width, area.height)
 	win.SelectObject(memhdc, win.HGDIOBJ(memBitmap))
@@ -174,26 +157,31 @@ func runOverlay(offsets Offset) {
 		win.DeleteObject(win.HGDIOBJ(memBitmap))
 		win.DeleteDC(memhdc)
 	}()
-
 	var overlayW, overlayH = area.width, area.height
 	rect := &win.RECT{Left: 0, Top: 0, Right: overlayW, Bottom: overlayH}
-
 	bgBrush, _, _ := createSolidBrush.Call(0x000000)
 	defer win.DeleteObject(win.HGDIOBJ(bgBrush))
 	font, _, _ := createFont.Call(13, 0, 0, 0, win.FW_SEMIBOLD, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.CLEARTYPE_QUALITY, win.DEFAULT_PITCH|win.FF_DONTCARE, 0)
 	defer win.DeleteObject(win.HGDIOBJ(font))
-
+	initOverlayGDI()
+	defer destroyOverlayGDI()
+	win.SetBkMode(memhdc, win.TRANSPARENT)
+	win.SelectObject(memhdc, win.HGDIOBJ(font))
 	frameDuration := time.Second / targetFPS
-
+	crosshairX := float32(overlayW) / 2
+	crosshairY := float32(overlayH) / 2
+	exitCheckCounter := 0
 	for {
 		frameStart := time.Now()
-
-		var exitCode uint32
-		if err := windows.GetExitCodeProcess(procHandle, &exitCode); err != nil || exitCode != stillActive {
-			fmt.Println("Process cs2.exe not found or has exited. Exiting program.")
-			break
+		exitCheckCounter++
+		if exitCheckCounter >= exitCheckInterval {
+			exitCheckCounter = 0
+			var exitCode uint32
+			if err := windows.GetExitCodeProcess(procHandle, &exitCode); err != nil || exitCode != stillActive {
+				fmt.Println("Process cs2.exe not found or has exited. Exiting program.")
+				break
+			}
 		}
-
 		if gameWnd = findGameWindow(pid); gameWnd != 0 {
 			area = syncOverlayToGame(hwnd, gameWnd)
 			if area.width > 0 && area.height > 0 && (area.width != overlayW || area.height != overlayH) {
@@ -203,29 +191,21 @@ func runOverlay(offsets Offset) {
 				win.SelectObject(memhdc, win.HGDIOBJ(memBitmap))
 				rect.Right = overlayW
 				rect.Bottom = overlayH
+				crosshairX = float32(overlayW) / 2
+				crosshairY = float32(overlayH) / 2
 			}
 		}
-
 		fillRect.Call(uintptr(memhdc), uintptr(unsafe.Pointer(rect)), bgBrush)
-		win.SetBkMode(memhdc, win.TRANSPARENT)
-		win.SelectObject(memhdc, win.HGDIOBJ(font))
-
 		projector := readViewProjection(procHandle, clientDll, offsets, float32(overlayW), float32(overlayH))
 		entities := getEntitiesInfo(procHandle, clientDll, projector, offsets)
 		recoilControl()
-
-		crosshairX := float32(overlayW) / 2
-		crosshairY := float32(overlayH) / 2
 		if AimbotEnabled {
 			aimbot(entities, crosshairX, crosshairY)
 		}
-
 		for _, entity := range entities {
 			renderEntity(memhdc, entity)
 		}
-
 		win.BitBlt(hdc, 0, 0, overlayW, overlayH, memhdc, 0, 0, win.SRCCOPY)
-
 		elapsed := time.Since(frameStart)
 		recordOverlayFrame(float32(elapsed.Milliseconds()))
 		minFrame := frameDuration

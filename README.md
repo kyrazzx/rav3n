@@ -2,7 +2,7 @@
 
 # RAV3N
 
-RAV3N is a Windows external overlay for Counter-Strike 2 written in Go. It reads game memory externally and renders ESP visuals on a transparent fullscreen overlay, with an optional configuration GUI for combat and visual features.
+RAV3N is a Windows external cheat for Counter-Strike 2 written in Go. It reads game memory externally and renders ESP visuals. This project is based on [cs2go](https://github.com/NYPDK/cs2go).
 
 > **Disclaimer:** This project is provided for educational and research purposes only. Using third-party tools in online games may violate the game's Terms of Service and result in a ban. Use at your own risk.
 
@@ -13,7 +13,8 @@ RAV3N is a Windows external overlay for Counter-Strike 2 written in Go. It reads
 - **Recoil control** — per-weapon presets (Default, AK-47, M4A4, M4A1-S, Galil AR, FAMAS) with customizable compensation axes and smoothing
 
 ### Visuals (ESP)
-- Bounding boxes (team-colored)
+- Bounding boxes (team-colored corner boxes)
+- Body highlight (filled bone silhouette)
 - Skeleton overlay
 - Head circle
 - Player names
@@ -24,7 +25,7 @@ RAV3N is a Windows external overlay for Counter-Strike 2 written in Go. It reads
 ### Performance
 - Target overlay refresh rate capped at 120 FPS
 - Configurable minimum frame time to reduce CPU usage
-- Batch memory reads and reused GDI back-buffer
+- Batch memory reads, entity-list stride caching, and reused GDI back-buffer
 - Real-time performance monitor (GUI FPS + overlay frametime graph)
 
 ### Configuration
@@ -33,8 +34,8 @@ RAV3N is a Windows external overlay for Counter-Strike 2 written in Go. It reads
 - Three UI theme presets: Raven Purple, Crimson Elite, Ice Neon
 
 ### Offsets
-- Automatic download from [a2x/cs2-dumper](https://github.com/a2x/cs2-dumper)
-- Local cache in `offsets.json` (refreshed every 6 hours)
+- Automatic download from [a2x/cs2-dumper](https://github.com/a2x/cs2-dumper) on every launch (online)
+- Local cache in `offsets.json` (used when offline, refreshed if younger than 1 hour)
 - Offline fallback to the last cached offsets file
 
 ## Requirements
@@ -48,6 +49,8 @@ RAV3N is a Windows external overlay for Counter-Strike 2 written in Go. It reads
 | Network | Internet access on first launch (offset download) |
 
 ## Build
+
+All source files share `package main` and are compiled into a single binary:
 
 ```bash
 go mod tidy
@@ -77,22 +80,69 @@ If the build fails with `C compiler "gcc" not found`, install MinGW-w64 and ensu
 
 Mouse 5 (`VK_XBUTTON2`, `0x06`) — changeable in the GUI under **Activation Key**.
 
+## Architecture
+
+RAV3N is a single Go module (`rav3n`) split into focused source files. There are no sub-packages: every `.go` file is part of `package main` and links at compile time via `go build`.
+
+```
+main()
+ ├── loadOffsets()          offsets.go
+ ├── go runOverlay()        main.go  ─┐
+ └── RunGui()               gui.go    │
+                                       ▼
+                              ┌────────────────────┐
+                              │   Overlay goroutine │
+                              └─────────┬──────────┘
+                                        │
+          findProcessId / getModuleBaseAddress / readPtr
+                                        │  memory.go
+          findGameWindow / syncOverlayToGame
+                                        │  game_window.go
+          readViewProjection / getEntitiesInfo
+                                        │  entities.go
+          aimbot()                      │  aimbot.go
+          recoilControl()                 │  main.go
+          renderEntity()                  │  esp_render.go
+          recordOverlayFrame()            │  gui_perf.go
+```
+
+### Shared globals
+
+Combat and ESP toggles (`AimbotEnabled`, `BoxRendering`, `TeamCheck`, etc.) are declared in `main.go` and read by the overlay loop, aimbot, entity iteration, and GUI pages. Profile save/load in `gui.go` snapshots and restores these values.
+
 ## Project structure
 
 ```
 rav3n/
-├── main.go          Overlay loop, rendering, aimbot, recoil
-├── entities.go      Entity iteration, bone batch reads, world-to-screen
-├── memory.go        Process/module access, memory reads, entity list helpers
-├── offsets.go       cs2-dumper fetch, cache, offset parsing
-├── gui.go           GUI layout, pages, profile save/load
-├── gui_theme.go     Color palette, theme presets, animation state
-├── gui_widgets.go   Custom UI components (cards, toggles, nav, graphs)
-├── gui_perf.go      FPS / frametime history tracking
-├── configs/         Saved profiles (created at runtime)
-├── configs/exports/ Named export profiles (created at runtime)
-└── offsets.json     Cached game offsets (created at runtime)
+├── main.go           Entry point, Win32 overlay window, overlay loop, recoil control
+├── aimbot.go         Aimbot targeting, smoothing, FOV lock, bone averaging
+├── entities.go       Entity types, world-to-screen, bone reads, player iteration
+├── esp_render.go     GDI drawing: boxes, skeleton, body highlight, health, names
+├── game_window.go    CS2 window discovery, client-area tracking, overlay sync
+├── memory.go         Process/module access, NtReadVirtualMemory, entity list helpers
+├── offsets.go        cs2-dumper fetch, schema parsing, offsets.json cache
+├── gui.go            GUI layout, pages, profile save/load/export
+├── gui_theme.go      Color palette, theme presets, UI animation state
+├── gui_widgets.go    Custom UI components (cards, toggles, nav, ESP preview, graphs)
+├── gui_perf.go       FPS / frametime history for the performance monitor
+├── configs/          Saved profiles (created at runtime)
+├── configs/exports/  Named export profiles (created at runtime)
+└── offsets.json      Cached game offsets (created at runtime)
 ```
+
+| File | Role |
+|---|---|
+| `main.go` | `main()`, overlay lifecycle, GDI setup, frame loop orchestration |
+| `aimbot.go` | Target selection, hysteresis deadzone, mouse movement |
+| `entities.go` | `Entity` struct, view matrix projection, player enumeration |
+| `esp_render.go` | All on-screen ESP rendering via Win32 GDI |
+| `game_window.go` | EnumWindows scan to find and track the CS2 client area |
+| `memory.go` | External memory reads, entity list stride (`0x70`) |
+| `offsets.go` | Live offset download + `offsets.json` persistence |
+| `gui.go` | Dear ImGui window via giu, config pages, JSON profiles |
+| `gui_theme.go` | Theme colors, easing helpers, `uiAnim` state |
+| `gui_widgets.go` | Reusable widgets: header, sidebar, cards, sliders, preview |
+| `gui_perf.go` | Rolling history buffers for the perf graph |
 
 ## Profiles
 
@@ -110,7 +160,7 @@ To force a fresh offset download after a CS2 game update, delete `offsets.json` 
 ## Performance tuning
 
 - Increase **Min Frame Time (ms)** in Settings to lower CPU usage (higher value = fewer overlay updates per second).
-- Disable skeleton ESP if you only need boxes — skeleton reads more bone data per player.
+- Disable skeleton or body highlight ESP if you only need boxes — both read full bone data per player.
 - The performance monitor in Settings shows GUI FPS (purple) and overlay throughput (green, derived from frametime).
 
 ## Troubleshooting
@@ -119,8 +169,9 @@ To force a fresh offset download after a CS2 game update, delete `offsets.json` 
 |---|---|
 | ESP not showing | Ensure CS2 is running before or after launch; delete `offsets.json` and relaunch |
 | Build fails (gcc) | Install MinGW-w64 and add it to `PATH` |
-| Stale offsets | Delete `offsets.json` or wait for the 6-hour cache to expire |
+| Stale offsets | Delete `offsets.json` or wait for the 1-hour cache to expire |
 | No profiles listed | Save a profile first — the `configs/` folder is created automatically |
+| Overlay misaligned | RAV3N tracks the CS2 client area each frame via `game_window.go` |
 
 ## Dependencies
 

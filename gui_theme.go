@@ -1,13 +1,10 @@
 package main
-
 import (
 	"image/color"
 	"math"
 	"time"
-
 	g "github.com/AllenDang/giu"
 )
-
 var (
 	colBg         = color.RGBA{9, 9, 14, 255}
 	colSidebar    = color.RGBA{12, 12, 18, 255}
@@ -25,22 +22,18 @@ var (
 	colTerrorist  = color.RGBA{255, 142, 120, 255}
 	colCT         = color.RGBA{122, 120, 255, 255}
 )
-
 type themePreset struct {
 	Name      string
 	Accent    color.RGBA
 	AccentDim color.RGBA
 	AccentSoft color.RGBA
 }
-
 var themePresets = []themePreset{
 	{Name: "Raven Purple", Accent: color.RGBA{139, 92, 246, 255}, AccentDim: color.RGBA{109, 40, 217, 255}, AccentSoft: color.RGBA{139, 92, 246, 40}},
 	{Name: "Crimson Elite", Accent: color.RGBA{239, 68, 68, 255}, AccentDim: color.RGBA{185, 28, 28, 255}, AccentSoft: color.RGBA{239, 68, 68, 40}},
 	{Name: "Ice Neon", Accent: color.RGBA{56, 189, 248, 255}, AccentDim: color.RGBA{14, 116, 144, 255}, AccentSoft: color.RGBA{56, 189, 248, 40}},
 }
-
 var selectedThemeIndex int32 = 0
-
 type uiAnim struct {
 	navIndicatorY    float32
 	navIndicatorDest float32
@@ -55,7 +48,6 @@ type uiAnim struct {
 	toggleState      map[string]float32
 	navHover         map[string]float32
 }
-
 var uiAnimation = uiAnim{
 	navIndicatorY:    108,
 	navIndicatorDest: 108,
@@ -66,7 +58,6 @@ var uiAnimation = uiAnim{
 	toggleState:      map[string]float32{},
 	navHover:         map[string]float32{},
 }
-
 func sectionIndex(section string) int {
 	switch section {
 	case sectionAimbot:

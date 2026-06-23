@@ -1,14 +1,11 @@
 package main
-
 const perfHistorySize = 120
-
 var (
 	perfGuiFPS         float32
 	perfOverlayMs      float32
 	perfGuiHistory     = make([]float32, 0, perfHistorySize)
 	perfOverlayHistory = make([]float32, 0, perfHistorySize)
 )
-
 func recordGuiFrame(fps float32) {
 	if fps <= 0 {
 		return

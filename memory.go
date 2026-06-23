@@ -1,24 +1,16 @@
 package main
-
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
-	"reflect"
 	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
-
 	"golang.org/x/sys/windows"
 )
-
 const entityListStride = 112
-
 var (
 	ntdll               = syscall.NewLazyDLL("ntdll.dll")
 	ntReadVirtualMemory = ntdll.NewProc("NtReadVirtualMemory")
-
 	readBufferPool = sync.Pool{
 		New: func() any {
 			buf := make([]byte, 4096)
@@ -26,14 +18,12 @@ var (
 		},
 	}
 )
-
 func getModuleBaseAddress(pid int, moduleName string) (uintptr, error) {
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPMODULE|windows.TH32CS_SNAPMODULE32, uint32(pid))
 	if err != nil {
 		return 0, err
 	}
 	defer windows.CloseHandle(snapshot)
-
 	var me32 windows.ModuleEntry32
 	me32.Size = uint32(unsafe.Sizeof(me32))
 	if err := windows.Module32First(snapshot, &me32); err != nil {
@@ -60,7 +50,6 @@ func findProcessId(name string) (int, error) {
 		return 0, err
 	}
 	defer windows.CloseHandle(snapshot)
-
 	var process windows.ProcessEntry32
 	process.Size = uint32(unsafe.Sizeof(process))
 	if err := windows.Process32First(snapshot, &process); err != nil {
@@ -95,7 +84,7 @@ func readMemory(process windows.Handle, address uintptr, buffer []byte) error {
 	return nil
 }
 
-func readAt(process windows.Handle, address uintptr, size int) ([]byte, error) {
+func withPooledBuffer(size int, fn func([]byte) error) error {
 	poolBuf := readBufferPool.Get().(*[]byte)
 	buf := *poolBuf
 	if cap(buf) < size {
@@ -103,67 +92,51 @@ func readAt(process windows.Handle, address uintptr, size int) ([]byte, error) {
 	} else {
 		buf = buf[:size]
 	}
-	if err := readMemory(process, address, buf); err != nil {
-		readBufferPool.Put(poolBuf)
-		return nil, err
-	}
-	out := make([]byte, size)
-	copy(out, buf)
+	err := fn(buf)
 	*poolBuf = buf
 	readBufferPool.Put(poolBuf)
+	return err
+}
+
+func readInto(process windows.Handle, address uintptr, dst unsafe.Pointer, size int) error {
+	return withPooledBuffer(size, func(buf []byte) error {
+		if err := readMemory(process, address, buf); err != nil {
+			return err
+		}
+		copy(unsafe.Slice((*byte)(dst), size), buf)
+		return nil
+	})
+}
+
+func readAt(process windows.Handle, address uintptr, size int) ([]byte, error) {
+	out := make([]byte, size)
+	if err := readInto(process, address, unsafe.Pointer(&out[0]), size); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
 func readSafe(process windows.Handle, address uintptr, value interface{}) error {
-	val := reflect.ValueOf(value)
-	if val.Kind() != reflect.Ptr {
-		return fmt.Errorf("value must be a pointer")
-	}
-	elem := val.Elem()
-	size := int(elem.Type().Size())
-	if size == 0 {
-		if elem.Type().Kind() == reflect.Slice {
-			size = elem.Cap()
-			if size == 0 {
-				return fmt.Errorf("cannot read into a slice with 0 capacity")
-			}
-		} else {
-			return fmt.Errorf("unsupported type with size 0: %T", value)
-		}
-	}
-
-	poolBuf := readBufferPool.Get().(*[]byte)
-	buf := *poolBuf
-	if cap(buf) < size {
-		buf = make([]byte, size)
-	} else {
-		buf = buf[:size]
-	}
-	if err := readMemory(process, address, buf); err != nil {
-		readBufferPool.Put(poolBuf)
-		return err
-	}
-
-	reader := bytes.NewReader(buf)
 	switch v := value.(type) {
-	case *[]byte:
-		copy(*v, buf)
+	case *uint8:
+		return readInto(process, address, unsafe.Pointer(v), 1)
+	case *bool:
+		return readInto(process, address, unsafe.Pointer(v), 1)
+	case *int32:
+		return readInto(process, address, unsafe.Pointer(v), 4)
+	case *uint32:
+		return readInto(process, address, unsafe.Pointer(v), 4)
 	case *uintptr:
-		var u64 uint64
-		if err := binary.Read(reader, binary.LittleEndian, &u64); err != nil {
-			readBufferPool.Put(poolBuf)
-			return err
-		}
-		*v = uintptr(u64)
+		return readInto(process, address, unsafe.Pointer(v), int(unsafe.Sizeof(uintptr(0))))
+	case *Vector3:
+		return readInto(process, address, unsafe.Pointer(v), 12)
+	case *[16]float32:
+		return readInto(process, address, unsafe.Pointer(v), 64)
+	case *[]byte:
+		return readInto(process, address, unsafe.Pointer(&(*v)[0]), len(*v))
 	default:
-		if err := binary.Read(reader, binary.LittleEndian, value); err != nil {
-			readBufferPool.Put(poolBuf)
-			return err
-		}
+		return fmt.Errorf("unsupported read type: %T", value)
 	}
-	*poolBuf = buf
-	readBufferPool.Put(poolBuf)
-	return nil
 }
 
 func readPtr(process windows.Handle, address uintptr) (uintptr, error) {

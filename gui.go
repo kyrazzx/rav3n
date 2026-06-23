@@ -1,5 +1,4 @@
 package main
-
 import (
 	"encoding/json"
 	"fmt"
@@ -9,45 +8,36 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
 	g "github.com/AllenDang/giu"
 )
-
 type recoilProfile struct {
 	X, Y, Smooth float32
 	StartBullet  int32
 }
-
 const (
 	sectionAimbot = "aimbot"
 	sectionESP    = "esp"
 	sectionMisc   = "misc"
 	sectionConfig = "config"
 )
-
 var (
 	activeSection = sectionAimbot
 	sidebarWidth  float32 = 200
-
 	keyNames        []string
 	keyMap          map[string]int32
 	selectedKeyIndex int32
-
 	weaponNames         []string
 	weaponConfigs       map[string]recoilProfile
 	selectedWeaponIndex int32
-
 	aimbotTargetNames         []string
 	aimbotTargetMap           map[string]string
 	selectedAimbotTargetIndex int32
-
 	configNameInput string
 	exportNameInput string
 	configStatus    = "No profile loaded"
 	configFiles     []string
 	configSelected  int32
 )
-
 type guiProfile struct {
 	ThemeIndex           int32   `json:"themeIndex"`
 	TeamCheck            bool    `json:"teamCheck"`
@@ -71,7 +61,6 @@ type guiProfile struct {
 	RecoilSmooth         float32 `json:"recoilSmooth"`
 	SelectedWeaponIndex  int32   `json:"selectedWeaponIndex"`
 }
-
 func profilesDir() string {
 	return "configs"
 }
@@ -156,6 +145,8 @@ func applyProfile(p guiProfile) {
 	AimbotKey = p.AimbotKey
 	AimbotSmoothing = p.AimbotSmoothing
 	AimbotTarget = p.AimbotTarget
+	syncAimbotBoneIndex()
+	syncAimbotFOV()
 	RecoilEnabled = p.RecoilEnabled
 	RecoilStartBullet = p.RecoilStartBullet
 	RecoilXAxis = p.RecoilXAxis
@@ -218,7 +209,6 @@ func init() {
 			break
 		}
 	}
-
 	weaponConfigs = map[string]recoilProfile{
 		"Default":  {X: 0.0, Y: 2.0, Smooth: 1.0, StartBullet: 1},
 		"AK-47":    {X: 0.0, Y: 2.0, Smooth: 1.0, StartBullet: 2},
@@ -232,7 +222,6 @@ func init() {
 		weaponNames = append(weaponNames, name)
 	}
 	sort.Strings(weaponNames)
-
 	aimbotTargetMap = map[string]string{
 		"Head":   "head",
 		"Neck":   "neck_0",
@@ -250,6 +239,8 @@ func init() {
 			break
 		}
 	}
+	syncAimbotBoneIndex()
+	syncAimbotFOV()
 }
 
 func loop(wnd *g.MasterWindow) {
@@ -257,7 +248,6 @@ func loop(wnd *g.MasterWindow) {
 	if uiAnimation.lastDelta > 0 {
 		recordGuiFrame(1 / uiAnimation.lastDelta)
 	}
-
 	theme := applyRav3nTheme()
 	theme.Push()
 	g.Custom(func() {
@@ -350,6 +340,7 @@ func buildAimbotPage() g.Widget {
 			}),
 			rav3nCombo("Target Bone", aimbotTargetNames[selectedAimbotTargetIndex], aimbotTargetNames, &selectedAimbotTargetIndex, func() {
 				AimbotTarget = aimbotTargetMap[aimbotTargetNames[selectedAimbotTargetIndex]]
+				syncAimbotBoneIndex()
 			}),
 		}),
 		g.Dummy(0, 12),

@@ -1,5 +1,4 @@
 package main
-
 import (
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"os"
 	"time"
 )
-
 const (
 	offsetsURL     = "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json"
 	clientDllURL   = "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json"
@@ -17,7 +15,6 @@ const (
 	offsetsMaxAge  = 1 * time.Hour
 	boneArrayDelta = 0x80
 )
-
 type Offset struct {
 	DwViewMatrix      uintptr `json:"dwViewMatrix"`
 	DwLocalPlayerPawn uintptr `json:"dwLocalPlayerPawn"`
@@ -35,11 +32,9 @@ type Offset struct {
 	M_bDormant        uintptr `json:"m_bDormant"`
 	M_iszPlayerName   uintptr `json:"m_iszPlayerName"`
 }
-
 func (o Offset) valid() bool {
 	return o.DwEntityList != 0 && o.DwLocalPlayerPawn != 0 && o.DwViewMatrix != 0
 }
-
 type schemaDump struct {
 	ClientDLL struct {
 		Classes map[string]struct {
@@ -47,13 +42,11 @@ type schemaDump struct {
 		} `json:"classes"`
 	} `json:"client.dll"`
 }
-
 type clientOffsets struct {
 	DwEntityList      uint64 `json:"dwEntityList"`
 	DwLocalPlayerPawn uint64 `json:"dwLocalPlayerPawn"`
 	DwViewMatrix      uint64 `json:"dwViewMatrix"`
 }
-
 type offsetsDump struct {
 	ClientDLL clientOffsets `json:"client.dll"`
 }
@@ -77,7 +70,6 @@ func downloadJSON(url string, dest any) error {
 		return err
 	}
 	req.Header.Set("User-Agent", "rav3n/2.0")
-
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -102,12 +94,10 @@ func buildOffsetsFromDumper() (Offset, error) {
 	if err := downloadJSON(clientDllURL, &schema); err != nil {
 		return Offset{}, fmt.Errorf("client_dll.json: %w", err)
 	}
-
 	modelState, err := schemaField(schema, "CSkeletonInstance", "m_modelState")
 	if err != nil {
 		return Offset{}, err
 	}
-
 	m := func(class, field string) uintptr {
 		v, err := schemaField(schema, class, field)
 		if err != nil {
@@ -115,7 +105,6 @@ func buildOffsetsFromDumper() (Offset, error) {
 		}
 		return v
 	}
-
 	offsets := Offset{
 		DwEntityList:      uintptr(offsetsData.ClientDLL.DwEntityList),
 		DwLocalPlayerPawn: uintptr(offsetsData.ClientDLL.DwLocalPlayerPawn),
@@ -182,14 +171,12 @@ func loadOffsets() Offset {
 	} else {
 		log.Printf("Warning: could not fetch offsets online: %v", err)
 	}
-
 	if offsetsFileFresh() {
 		if offsets, err := loadOffsetsFromFile(); err == nil {
 			log.Println("Using cached offsets.json")
 			return offsets
 		}
 	}
-
 	offsets, err := loadOffsetsFromFile()
 	if err != nil {
 		log.Fatalf("No valid offsets available: %v", err)

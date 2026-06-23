@@ -1,13 +1,10 @@
 package main
-
 import (
 	"sync"
 	"syscall"
 	"time"
-
 	"github.com/lxn/win"
 )
-
 var (
 	procEnumWindows     = user32.NewProc("EnumWindows")
 	procIsWindow        = user32.NewProc("IsWindow")
@@ -20,8 +17,8 @@ var (
 	cachedGamePID        int
 	cachedGameCheckedAt  time.Time
 	gameWindowCacheTTL   = 750 * time.Millisecond
+	lastSyncedArea       gameClientArea
 )
-
 func enumWindowsProc(hwnd win.HWND, _ uintptr) uintptr {
 	var windowPID uint32
 	win.GetWindowThreadProcessId(hwnd, &windowPID)
@@ -55,19 +52,16 @@ func findGameWindow(pid int) win.HWND {
 			return cachedGameHWND
 		}
 	}
-
 	initEnumWindowsCallback()
 	enumTargetPID = pid
 	enumBestHWND = 0
 	enumBestArea = 0
 	procEnumWindows.Call(enumWindowsCallback, 0)
-
 	cachedGamePID = pid
 	cachedGameHWND = enumBestHWND
 	cachedGameCheckedAt = now
 	return enumBestHWND
 }
-
 type gameClientArea struct {
 	x, y, width, height int32
 }
@@ -90,6 +84,10 @@ func syncOverlayToGame(overlay, game win.HWND) gameClientArea {
 	if area.width <= 0 || area.height <= 0 {
 		return area
 	}
+	if area == lastSyncedArea {
+		return area
+	}
+	lastSyncedArea = area
 	win.SetWindowPos(
 		overlay, win.HWND_TOPMOST,
 		area.x, area.y, area.width, area.height,
