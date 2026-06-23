@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const entityListStride = 112 // 0x70 — updated from 0x78 in CS2 entity list layout
+const entityListStride = 112
 
 var (
 	ntdll               = syscall.NewLazyDLL("ntdll.dll")

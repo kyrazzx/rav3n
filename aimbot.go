@@ -7,7 +7,7 @@ import (
 
 const (
 	aimBoneSamples = 4
-	aimTickMs        = 16 // ~60 Hz — stable, avoids micro-corrections
+	aimTickMs        = 16
 )
 
 var (
@@ -115,7 +115,6 @@ func resolveAimTarget(entities []Entity, crosshairX, crosshairY float32) (*Entit
 	return candidate, pos, true
 }
 
-// moveRatio returns max fraction of remaining distance allowed per tick.
 func moveRatio(smooth float32) float32 {
 	switch {
 	case smooth <= 1.5:
@@ -167,7 +166,6 @@ func aimbot(entities []Entity, crosshairX, crosshairY float32) {
 		smooth = 1
 	}
 
-	// Hysteresis deadzone — stop oscillating around the head.
 	enterZone := 3.5 + smooth*0.15
 	exitZone := enterZone + 2.5
 	if aimOnTarget {
@@ -184,11 +182,9 @@ func aimbot(entities []Entity, crosshairX, crosshairY float32) {
 		return
 	}
 
-	// Single smoothing step: divide error by slider value.
 	moveX := dx / smooth
 	moveY := dy / smooth
 
-	// Hard cap: never move more than a fraction of remaining distance.
 	maxMove := dist * moveRatio(smooth)
 	if isShooting() {
 		maxMove *= 0.5
@@ -203,7 +199,6 @@ func aimbot(entities []Entity, crosshairX, crosshairY float32) {
 	ix := int(math.Trunc(float64(moveX)))
 	iy := int(math.Trunc(float64(moveY)))
 
-	// Only move when error is large enough — no sub-pixel ping-pong.
 	if ix == 0 && iy == 0 {
 		return
 	}

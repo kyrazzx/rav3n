@@ -69,16 +69,12 @@ func drawCornerBox(hdc win.HDC, rect Rectangle, color uintptr, thickness int32) 
 	l, t, r, b := int32(rect.Left), int32(rect.Top), int32(rect.Right), int32(rect.Bottom)
 	c := int32(cl)
 
-	// top-left
 	drawLine(hdc, pen, l, t, l+c, t)
 	drawLine(hdc, pen, l, t, l, t+c)
-	// top-right
 	drawLine(hdc, pen, r, t, r-c, t)
 	drawLine(hdc, pen, r, t, r, t+c)
-	// bottom-left
 	drawLine(hdc, pen, l, b, l+c, b)
 	drawLine(hdc, pen, l, b, l, b-c)
-	// bottom-right
 	drawLine(hdc, pen, r, b, r-c, b)
 	drawLine(hdc, pen, r, b, r, b-c)
 }

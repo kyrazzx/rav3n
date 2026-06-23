@@ -61,7 +61,6 @@ func newScreenProjector(width, height float32, view [16]float32) screenProjector
 	return screenProjector{width: width, height: height, view: view}
 }
 
-// worldToScreen projects a world position through CS2's view-projection matrix (16 floats, row-major).
 func (sp screenProjector) worldToScreen(position Vector3) (float32, float32, bool) {
 	if sp.width <= 0 || sp.height <= 0 {
 		return 0, 0, false
